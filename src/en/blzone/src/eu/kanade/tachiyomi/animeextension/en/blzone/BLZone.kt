@@ -227,9 +227,20 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     // ---- GET VIDEO LIST ----
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
-        val videos = videoListParse(response)
+        val responseHtml = response.body?.string().orEmpty()
+        val videos = videoListParse(Response.Builder()
+            .request(response.request)
+            .protocol(response.protocol)
+            .code(response.code)
+            .message(response.message)
+            .headers(response.headers)
+            .body(okhttp3.ResponseBody.create(response.body?.contentType(), responseHtml))
+            .build()
+        )
 
         val extractedVideos = mutableListOf<Video>()
+        var addedP2P = false
+
         for (video in videos) {
             val url = video.url
             val videoName = video.quality.lowercase()
@@ -238,9 +249,19 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 url.contains("streamtape") -> extractedVideos += streamtapeExtractor.videosFromUrl(url)
                 url.contains("mixdrop") -> extractedVideos += mixDropExtractor.videosFromUrl(url)
                 url.contains("vgembed") || videoName.contains("vidguard") -> extractedVideos += vidGuardExtractor.videosFromUrl(url)
-                // upnshare: only add if it is a direct mp4 link (as fallback, not as a primary server)
                 (videoName.contains("upnshare") || url.contains("upns")) && url.endsWith(".mp4") -> extractedVideos += Video(url, "Upnshare", url)
-                videoName.contains("p2p") || url.contains("p2p") -> extractedVideos += Video(url, "P2P", url)
+                videoName.contains("p2p") || url.contains("p2p") -> {
+                    // Extract real HLS for P2P
+                    if (!addedP2P) {
+                        val m3u8Url = extractM3u8UrlFromHtml(responseHtml)
+                        if (m3u8Url != null) {
+                            extractedVideos += Video(m3u8Url, "P2P HLS", m3u8Url)
+                            addedP2P = true
+                        } else {
+                            extractedVideos += Video(url, "P2P (iframe)", url)
+                        }
+                    }
+                }
                 else -> extractedVideos += Video(url, video.quality.replaceFirstChar { it.uppercase() }, url)
             }
         }
@@ -254,5 +275,11 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 }
             },
         )
+    }
+
+    // ---- HELPER: Extract first .m3u8 URL from HTML ----
+    private fun extractM3u8UrlFromHtml(html: String): String? {
+        val m3u8Regex = Regex("""https?:\\/\\/[^"'\\]+\.m3u8""")
+        return m3u8Regex.find(html)?.value?.replace("\\/", "/")
     }
 }
