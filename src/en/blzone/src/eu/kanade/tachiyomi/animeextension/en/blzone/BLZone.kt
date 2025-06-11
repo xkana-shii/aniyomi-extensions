@@ -1,9 +1,6 @@
 package eu.kanade.tachiyomi.animeextension.en.blzone
 
 import android.app.Application
-import androidx.preference.ListPreference
-import androidx.preference.PreferenceScreen
-import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -13,7 +10,6 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.lib.filemoonextractor.FilemoonExtractor
 import eu.kanade.tachiyomi.lib.mixdropextractor.MixDropExtractor
-import eu.kanade.tachiyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
 import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
 import eu.kanade.tachiyomi.network.GET
@@ -26,42 +22,14 @@ import org.jsoup.nodes.Element
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
-class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
+class BLZone : AnimeHttpSource() {
 
     override val name = "BLZone"
     override val baseUrl = "https://blzone.net"
     override val lang = "en"
     override val supportsLatest = true
 
-    private val preferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
-
-    private val playlistUtils by lazy { PlaylistUtils(client, headers) }
-
-    companion object {
-        private const val PREF_SERVER_KEY = "preferred_server"
-        private const val PREF_SERVER_TITLE = "Preferred Server"
-        private val PREF_SERVER_ENTRIES = arrayOf(
-            "Filemoon", "Streamtape", "MixDrop", "VidGuard", "Upnshare", "P2P",
-        )
-        private val PREF_SERVER_VALUES = arrayOf(
-            "filemoon", "streamtape", "mixdrop", "vidguard", "upnshare", "p2p",
-        )
-        private const val PREF_SERVER_DEFAULT = "filemoon"
-    }
-
-    override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        ListPreference(screen.context).apply {
-            key = PREF_SERVER_KEY
-            title = PREF_SERVER_TITLE
-            entries = PREF_SERVER_ENTRIES
-            entryValues = PREF_SERVER_VALUES
-            setDefaultValue(PREF_SERVER_DEFAULT)
-            summary = "%s"
-        }.also(screen::addPreference)
-    }
-
+    // ---- FILTERS ----
     private enum class Type(val path: String, val display: String) {
         ANIME("anime", "Anime"),
         DRAMA("dorama", "Drama"),
@@ -84,6 +52,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         }
     }
 
+    // ---- POPULAR ----
     override fun popularAnimeRequest(page: Int): Request = GET("$baseUrl/trending/", headers)
 
     override fun popularAnimeParse(response: Response): AnimesPage {
@@ -105,6 +74,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return anime
     }
 
+    // ---- LATEST ----
     override fun latestUpdatesRequest(page: Int): Request {
         val animePageUrl = if (page == 1) "$baseUrl/anime/" else "$baseUrl/anime/page/$page/"
         return GET(animePageUrl, headers)
@@ -132,6 +102,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return document.selectFirst(".pagination .next:not(.disabled)") != null
     }
 
+    // ---- SEARCH ----
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val type = getTypeFromFilters(filters)
         val q = query.trim()
@@ -158,6 +129,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return anime
     }
 
+    // ---- DETAILS ----
     override fun animeDetailsParse(response: Response): SAnime {
         val document = response.asJsoup()
         val anime = SAnime.create()
@@ -173,8 +145,10 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return anime
     }
 
+    // ---- EPISODES ----
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.asJsoup()
+        // Reverse the list so newest episode is first!
         return document.select("#episodes ul.episodios2 > li").map { episodeFromElement(it) }.reversed()
     }
 
@@ -189,11 +163,13 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return ep
     }
 
+    // ---- VIDEO EXTRACTORS ----
     private val filemoonExtractor by lazy { FilemoonExtractor(client) }
     private val streamtapeExtractor by lazy { StreamTapeExtractor(client) }
     private val mixDropExtractor by lazy { MixDropExtractor(client) }
     private val vidGuardExtractor by lazy { VidGuardExtractor(client) }
 
+    // ---- VIDEO LIST PARSE ----
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
         val serverNames = document.select("#playeroptionsul li span.title").map { it.text().trim().lowercase() }
@@ -215,6 +191,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return videos
     }
 
+    // ---- GET VIDEO LIST ----
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
         val html = response.body?.string().orEmpty()
@@ -226,12 +203,10 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 .message(response.message)
                 .headers(response.headers)
                 .body(okhttp3.ResponseBody.create(response.body?.contentType(), html))
-                .build(),
+                .build()
         )
 
         val extractedVideos = mutableListOf<Video>()
-        var addedP2P = false
-
         for (video in videos) {
             val url = video.url
             val videoName = video.quality.lowercase()
@@ -240,34 +215,9 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 url.contains("streamtape") -> extractedVideos += streamtapeExtractor.videosFromUrl(url)
                 url.contains("mixdrop") -> extractedVideos += mixDropExtractor.videosFromUrl(url)
                 url.contains("vgembed") || videoName.contains("vidguard") -> extractedVideos += vidGuardExtractor.videosFromUrl(url)
-                (videoName.contains("upnshare") || url.contains("upns")) && url.endsWith(".mp4") -> extractedVideos += Video(url, "Upnshare", url)
-                videoName.contains("p2p") || url.contains("p2p") -> {
-                    if (!addedP2P) {
-                        val m3u8Url = extractM3u8UrlFromHtml(html)
-                        if (m3u8Url != null) {
-                            extractedVideos += playlistUtils.extractFromHls(m3u8Url)
-                            addedP2P = true
-                        } else {
-                            extractedVideos += Video(url, "P2P (iframe)", url)
-                        }
-                    }
-                }
                 else -> extractedVideos += Video(url, video.quality.replaceFirstChar { it.uppercase() }, url)
             }
         }
-        return extractedVideos.sortedWith(
-            compareByDescending<Video> {
-                when {
-                    it.quality.lowercase().contains("filemoon") -> 2
-                    it.quality.lowercase().contains("vidguard") -> 1
-                    else -> 0
-                }
-            },
-        )
-    }
-
-    private fun extractM3u8UrlFromHtml(html: String): String? {
-        val m3u8Regex = Regex("""https?:\\/\\/[^"'\\]+\.m3u8""")
-        return m3u8Regex.find(html)?.value?.replace("\\/", "/")
+        return extractedVideos
     }
 }
