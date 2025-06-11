@@ -1,9 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.en.blzone
 
-import android.app.Application
-import android.content.SharedPreferences
-import androidx.preference.ListPreference
-import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
@@ -13,8 +9,8 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.lib.filemoonextractor.FilemoonExtractor
-import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
 import eu.kanade.tachiyomi.lib.mixdropextractor.MixDropExtractor
+import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
 import eu.kanade.tachiyomi.lib.vidguardextractor.VidguardExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
@@ -30,17 +26,23 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     override val supportsLatest = true
 
     // ---- FILTERS ----
-    private enum class Type(val path: String, val display: String) {
+    private enum class Type(
+        val path: String,
+        val display: String,
+    ) {
         ANIME("anime", "Anime"),
         DRAMA("dorama", "Drama"),
-        BOTH("", "Both")
+        BOTH("", "Both"),
     }
 
     private class TypeFilter : AnimeFilter.Select<String>(
-        "Type", arrayOf(Type.BOTH.display, Type.ANIME.display, Type.DRAMA.display)
+        "Type",
+        arrayOf(Type.BOTH.display, Type.ANIME.display, Type.DRAMA.display),
     )
 
-    override fun getFilterList(): AnimeFilterList = AnimeFilterList(TypeFilter())
+    override fun getFilterList(): AnimeFilterList = AnimeFilterList(
+        TypeFilter(),
+    )
 
     private fun getTypeFromFilters(filters: AnimeFilterList): Type {
         val typeIndex = (filters.getOrNull(0) as? AnimeFilter.Select<*>)?.state ?: 0
@@ -122,7 +124,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return when (type) {
             Type.ANIME -> GET("$baseUrl/anime/?s=$q", headers)
             Type.DRAMA -> GET("$baseUrl/dorama/?s=$q", headers)
-            Type.BOTH  -> GET("$baseUrl/?s=$q", headers)
+            Type.BOTH -> GET("$baseUrl/?s=$q", headers)
         }
     }
 
@@ -244,5 +246,9 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return extractedVideos
     }
 
-    data class BLZoneRawVideo(val url: String, val name: String, val quality: String? = null)
+    data class BLZoneRawVideo(
+        val url: String,
+        val name: String,
+        val quality: String? = null,
+    )
 }
