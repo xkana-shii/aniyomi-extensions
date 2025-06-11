@@ -252,7 +252,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                     it.quality.lowercase().contains("vidguard") -> 1
                     else -> 0
                 }
-            }
+            },
         )
     }
 }
