@@ -11,9 +11,9 @@ import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.lib.filemoonextractor.FilemoonExtractor
 import eu.kanade.tachiyomi.lib.mixdropextractor.MixDropExtractor
 import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
-import eu.kanade.tachiyomi.lib.vidguardextractor.VidguardExtractor
+import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.await
+import eu.kanade.tachiyomi.network.asJsoup
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
@@ -61,15 +61,12 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     override fun popularAnimeParse(response: Response): AnimesPage {
         val document = response.asJsoup()
         val animeList = mutableListOf<SAnime>()
-        animeList += document.select("#dt-tvshows .item.tvshows").map { popularAnimeFromElement(it) }
-        animeList += document.select("#dt-movies .item.tvshows").map { popularAnimeFromElement(it) }
+        animeList.addAll(document.select("#dt-tvshows .item.tvshows").map { popularAnimeFromElement(it) })
+        animeList.addAll(document.select("#dt-movies .item.tvshows").map { popularAnimeFromElement(it) })
         return AnimesPage(animeList, hasNextPage = false)
     }
 
-    override fun popularAnimeSelector(): String =
-        "#dt-tvshows .item.tvshows, #dt-movies .item.tvshows"
-
-    override fun popularAnimeFromElement(element: Element): SAnime {
+    private fun popularAnimeFromElement(element: Element): SAnime {
         val anime = SAnime.create()
         val poster = element.selectFirst(".poster")
         val link = poster?.selectFirst("a")?.attr("href") ?: ""
@@ -89,14 +86,14 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     override fun latestUpdatesParse(response: Response): AnimesPage {
         val document = response.asJsoup()
         val animeList = mutableListOf<SAnime>()
-        animeList += document.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) }
+        animeList.addAll(document.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
 
         // Only fetch dorama for first page (to avoid duplicate pagination issues)
         if (response.request.url.encodedPath.endsWith("/anime/")) {
             try {
                 val dramaResponse = client.newCall(GET("$baseUrl/dorama/", headers)).execute()
                 val dramaDoc = dramaResponse.asJsoup()
-                animeList += dramaDoc.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) }
+                animeList.addAll(dramaDoc.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
             } catch (_: Exception) {
                 // Ignore errors on drama
             }
@@ -105,13 +102,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return AnimesPage(animeList, hasNextPage = hasNextPage(document))
     }
 
-    override fun latestUpdatesSelector(): String = ".items.full .item.tvshows"
-
-    override fun latestAnimeFromElement(element: Element): SAnime = popularAnimeFromElement(element)
-
-    override fun latestUpdatesFromElement(element: Element): SAnime = latestAnimeFromElement(element)
-
-    override fun latestUpdatesNextPageSelector(): String? = ".pagination .next:not(.disabled)"
+    private fun latestAnimeFromElement(element: Element): SAnime = popularAnimeFromElement(element)
 
     private fun hasNextPage(document: org.jsoup.nodes.Document): Boolean {
         return document.selectFirst(".pagination .next:not(.disabled)") != null
@@ -134,9 +125,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return AnimesPage(animeList, hasNextPage = false)
     }
 
-    override fun searchAnimeSelector(): String = ".search-page .result-item article"
-
-    override fun searchAnimeFromElement(element: Element): SAnime {
+    private fun searchAnimeFromElement(element: Element): SAnime {
         val anime = SAnime.create()
         val img = element.selectFirst(".thumbnail img")
         val link = element.selectFirst(".thumbnail a")?.attr("href") ?: ""
@@ -167,7 +156,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return document.select("#episodes ul.episodios2 > li").map { episodeFromElement(it) }
     }
 
-    override fun episodeFromElement(element: Element): SEpisode {
+    private fun episodeFromElement(element: Element): SEpisode {
         val ep = SEpisode.create()
         val link = element.selectFirst(".episodiotitle a")?.attr("href") ?: ""
         ep.setUrlWithoutDomain(link)
@@ -182,7 +171,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     private val filemoonExtractor by lazy { FilemoonExtractor(client) }
     private val streamtapeExtractor by lazy { StreamTapeExtractor(client) }
     private val mixDropExtractor by lazy { MixDropExtractor(client) }
-    private val vidguardExtractor by lazy { VidguardExtractor(client) }
+    private val vidGuardExtractor by lazy { VidGuardExtractor(client) }
 
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
@@ -227,8 +216,9 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                     extractedVideos += mixDropExtractor.videosFromUrl(url)
                 }
                 url.contains("vgembed") || name.contains("vidguard") -> {
-                    extractedVideos += vidguardExtractor.videosFromUrl(url)
+                    extractedVideos += vidGuardExtractor.videosFromUrl(url)
                 }
+                // Upnshare, p2p, zoneplay: no extractors, pass as direct
                 name.contains("upnshare") || url.contains("upns") -> {
                     extractedVideos += Video(url, "Upnshare", url)
                 }
@@ -238,6 +228,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 name.contains("zoneplay") || url.contains("zoneplay") -> {
                     extractedVideos += Video(url, "ZonePlay", url)
                 }
+                // fallback: direct iframe (may be playable)
                 else -> {
                     extractedVideos += Video(url, name.replaceFirstChar { it.uppercase() }, url)
                 }
