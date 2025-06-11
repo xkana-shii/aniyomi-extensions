@@ -198,7 +198,9 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 val name = serverNames.getOrNull(index) ?: "server${index + 1}"
                 val videoUrl = if (src.contains("/diclaimer/?url=")) {
                     java.net.URLDecoder.decode(src.substringAfter("/diclaimer/?url="), "UTF-8")
-                } else src
+                } else {
+                    src
+                }
                 videos += BLZoneRawVideo(videoUrl, name)
             }
         }
