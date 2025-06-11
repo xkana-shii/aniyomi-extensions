@@ -42,10 +42,10 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         private const val PREF_SERVER_TITLE = "Preferred Server"
         private val PREF_SERVER_ENTRIES = arrayOf(
             "Filemoon", "Streamtape", "MixDrop", "VidGuard", "Upnshare", "P2P"
-        ,)
+        )
         private val PREF_SERVER_VALUES = arrayOf(
             "filemoon", "streamtape", "mixdrop", "vidguard", "upnshare", "p2p"
-        ,)
+        )
         private const val PREF_SERVER_DEFAULT = "filemoon"
     }
 
