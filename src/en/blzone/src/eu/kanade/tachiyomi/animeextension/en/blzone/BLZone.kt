@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.en.blzone
 
-import android.app.Application
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -19,8 +18,6 @@ import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 class BLZone : AnimeHttpSource() {
 
@@ -85,12 +82,14 @@ class BLZone : AnimeHttpSource() {
         val animeList = mutableListOf<SAnime>()
         animeList.addAll(document.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
 
+        // Only fetch dorama for first page (to avoid duplicate pagination issues)
         if (response.request.url.encodedPath.endsWith("/anime/")) {
             try {
                 val dramaResponse = client.newCall(GET("$baseUrl/dorama/", headers)).execute()
                 val dramaDoc = dramaResponse.asJsoup()
                 animeList.addAll(dramaDoc.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
             } catch (_: Exception) {
+                // Ignore errors on drama
             }
         }
         return AnimesPage(animeList, hasNextPage = hasNextPage(document))
@@ -194,17 +193,7 @@ class BLZone : AnimeHttpSource() {
     // ---- GET VIDEO LIST ----
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
-        val html = response.body?.string().orEmpty()
-        val videos = videoListParse(
-            Response.Builder()
-                .request(response.request)
-                .protocol(response.protocol)
-                .code(response.code)
-                .message(response.message)
-                .headers(response.headers)
-                .body(okhttp3.ResponseBody.create(response.body?.contentType(), html))
-                .build()
-        )
+        val videos = videoListParse(response)
 
         val extractedVideos = mutableListOf<Video>()
         for (video in videos) {
