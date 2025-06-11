@@ -171,21 +171,24 @@ class BLZone : AnimeHttpSource() {
     // ---- VIDEO LIST PARSE ----
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
+        val supportedServers = setOf("filemoon", "streamtape", "mixdrop", "vidguard")
         val serverNames = document.select("#playeroptionsul li span.title").map { it.text().trim().lowercase() }
         val serverBoxes = document.select(".dooplay_player .source-box").drop(1)
 
         val videos = mutableListOf<Video>()
         serverBoxes.forEachIndexed { index, box ->
+            val serverName = serverNames.getOrNull(index) ?: "server${index + 1}"
+            if (serverName !in supportedServers) return@forEachIndexed
+
             val iframe = box.selectFirst("iframe.metaframe")
             val src = iframe?.attr("src")?.trim().orEmpty()
             if (src.isBlank()) return@forEachIndexed
-            val name = serverNames.getOrNull(index) ?: "server${index + 1}"
             val videoUrl = if (src.contains("/diclaimer/?url=")) {
                 java.net.URLDecoder.decode(src.substringAfter("/diclaimer/?url="), "UTF-8")
             } else {
                 src
             }
-            videos += Video(videoUrl, name, videoUrl)
+            videos += Video(videoUrl, serverName, videoUrl)
         }
         return videos
     }
