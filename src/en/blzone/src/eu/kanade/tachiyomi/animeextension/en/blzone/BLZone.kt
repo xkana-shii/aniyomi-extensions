@@ -228,14 +228,15 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
         val responseHtml = response.body?.string().orEmpty()
-        val videos = videoListParse(Response.Builder()
-            .request(response.request)
-            .protocol(response.protocol)
-            .code(response.code)
-            .message(response.message)
-            .headers(response.headers)
-            .body(okhttp3.ResponseBody.create(response.body?.contentType(), responseHtml))
-            .build()
+        val videos = videoListParse(
+            Response.Builder()
+                .request(response.request)
+                .protocol(response.protocol)
+                .code(response.code)
+                .message(response.message)
+                .headers(response.headers)
+                .body(okhttp3.ResponseBody.create(response.body?.contentType(), responseHtml))
+                .build(),
         )
 
         val extractedVideos = mutableListOf<Video>()
