@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.lib.filemoonextractor.FilemoonExtractor
 import eu.kanade.tachiyomi.lib.mixdropextractor.MixDropExtractor
 import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
 import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
+import eu.kanade.tachiyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.util.asJsoup
@@ -32,10 +33,11 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     override val lang = "en"
     override val supportsLatest = true
 
-    // ---- Preferences ----
     private val preferences by lazy {
         Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     }
+
+    private val playlistUtils by lazy { PlaylistUtils(client, headers) }
 
     companion object {
         private const val PREF_SERVER_KEY = "preferred_server"
@@ -60,7 +62,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         }.also(screen::addPreference)
     }
 
-    // ---- FILTERS ----
     private enum class Type(val path: String, val display: String) {
         ANIME("anime", "Anime"),
         DRAMA("dorama", "Drama"),
@@ -83,7 +84,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         }
     }
 
-    // ---- POPULAR ----
     override fun popularAnimeRequest(page: Int): Request = GET("$baseUrl/trending/", headers)
 
     override fun popularAnimeParse(response: Response): AnimesPage {
@@ -105,7 +105,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return anime
     }
 
-    // ---- LATEST ----
     override fun latestUpdatesRequest(page: Int): Request {
         val animePageUrl = if (page == 1) "$baseUrl/anime/" else "$baseUrl/anime/page/$page/"
         return GET(animePageUrl, headers)
@@ -116,14 +115,12 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         val animeList = mutableListOf<SAnime>()
         animeList.addAll(document.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
 
-        // Only fetch dorama for first page (to avoid duplicate pagination issues)
         if (response.request.url.encodedPath.endsWith("/anime/")) {
             try {
                 val dramaResponse = client.newCall(GET("$baseUrl/dorama/", headers)).execute()
                 val dramaDoc = dramaResponse.asJsoup()
                 animeList.addAll(dramaDoc.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
             } catch (_: Exception) {
-                // Ignore errors on drama
             }
         }
         return AnimesPage(animeList, hasNextPage = hasNextPage(document))
@@ -135,7 +132,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return document.selectFirst(".pagination .next:not(.disabled)") != null
     }
 
-    // ---- SEARCH ----
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val type = getTypeFromFilters(filters)
         val q = query.trim()
@@ -162,7 +158,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return anime
     }
 
-    // ---- DETAILS ----
     override fun animeDetailsParse(response: Response): SAnime {
         val document = response.asJsoup()
         val anime = SAnime.create()
@@ -178,10 +173,8 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return anime
     }
 
-    // ---- EPISODES ----
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.asJsoup()
-        // Reverse the list so newest episode is first!
         return document.select("#episodes ul.episodios2 > li").map { episodeFromElement(it) }.reversed()
     }
 
@@ -196,13 +189,11 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return ep
     }
 
-    // ---- VIDEO EXTRACTORS ----
     private val filemoonExtractor by lazy { FilemoonExtractor(client) }
     private val streamtapeExtractor by lazy { StreamTapeExtractor(client) }
     private val mixDropExtractor by lazy { MixDropExtractor(client) }
     private val vidGuardExtractor by lazy { VidGuardExtractor(client) }
 
-    // ---- VIDEO LIST PARSE ----
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
         val serverNames = document.select("#playeroptionsul li span.title").map { it.text().trim().lowercase() }
@@ -224,19 +215,17 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return videos
     }
 
-    // ---- GET VIDEO LIST ----
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
-        val responseHtml = response.body?.string().orEmpty()
-        val videos = videoListParse(
-            Response.Builder()
-                .request(response.request)
-                .protocol(response.protocol)
-                .code(response.code)
-                .message(response.message)
-                .headers(response.headers)
-                .body(okhttp3.ResponseBody.create(response.body?.contentType(), responseHtml))
-                .build(),
+        val html = response.body?.string().orEmpty()
+        val videos = videoListParse(Response.Builder()
+            .request(response.request)
+            .protocol(response.protocol)
+            .code(response.code)
+            .message(response.message)
+            .headers(response.headers)
+            .body(okhttp3.ResponseBody.create(response.body?.contentType(), html))
+            .build()
         )
 
         val extractedVideos = mutableListOf<Video>()
@@ -252,11 +241,10 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 url.contains("vgembed") || videoName.contains("vidguard") -> extractedVideos += vidGuardExtractor.videosFromUrl(url)
                 (videoName.contains("upnshare") || url.contains("upns")) && url.endsWith(".mp4") -> extractedVideos += Video(url, "Upnshare", url)
                 videoName.contains("p2p") || url.contains("p2p") -> {
-                    // Extract real HLS for P2P
                     if (!addedP2P) {
-                        val m3u8Url = extractM3u8UrlFromHtml(responseHtml)
+                        val m3u8Url = extractM3u8UrlFromHtml(html)
                         if (m3u8Url != null) {
-                            extractedVideos += Video(m3u8Url, "P2P HLS", m3u8Url)
+                            extractedVideos += playlistUtils.extractFromHls(m3u8Url)
                             addedP2P = true
                         } else {
                             extractedVideos += Video(url, "P2P (iframe)", url)
@@ -266,7 +254,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 else -> extractedVideos += Video(url, video.quality.replaceFirstChar { it.uppercase() }, url)
             }
         }
-        // Always enforce priority order: filemoon > vidguard > rest
         return extractedVideos.sortedWith(
             compareByDescending<Video> {
                 when {
@@ -278,7 +265,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         )
     }
 
-    // ---- HELPER: Extract first .m3u8 URL from HTML ----
     private fun extractM3u8UrlFromHtml(html: String): String? {
         val m3u8Regex = Regex("""https?:\\/\\/[^"'\\]+\.m3u8""")
         return m3u8Regex.find(html)?.value?.replace("\\/", "/")
