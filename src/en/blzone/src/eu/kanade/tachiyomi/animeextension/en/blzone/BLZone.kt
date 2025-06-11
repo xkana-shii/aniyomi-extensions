@@ -40,8 +40,12 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     companion object {
         private const val PREF_SERVER_KEY = "preferred_server"
         private const val PREF_SERVER_TITLE = "Preferred Server"
-        private val PREF_SERVER_ENTRIES = arrayOf("Filemoon", "Streamtape", "MixDrop", "VidGuard", "Upnshare", "P2P")
-        private val PREF_SERVER_VALUES = arrayOf("filemoon", "streamtape", "mixdrop", "vidguard", "upnshare", "p2p")
+        private val PREF_SERVER_ENTRIES = arrayOf(
+            "Filemoon", "Streamtape", "MixDrop", "VidGuard", "Upnshare", "P2P"
+        )
+        private val PREF_SERVER_VALUES = arrayOf(
+            "filemoon", "streamtape", "mixdrop", "vidguard", "upnshare", "p2p"
+        )
         private const val PREF_SERVER_DEFAULT = "filemoon"
     }
 
@@ -234,18 +238,14 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 url.contains("streamtape") -> extractedVideos += streamtapeExtractor.videosFromUrl(url)
                 url.contains("mixdrop") -> extractedVideos += mixDropExtractor.videosFromUrl(url)
                 url.contains("vgembed") || videoName.contains("vidguard") -> extractedVideos += vidGuardExtractor.videosFromUrl(url)
-                videoName.contains("upnshare") || url.contains("upns") -> extractedVideos += Video(url, "Upnshare", url)
+                // upnshare: only add if it is a direct mp4 link (as fallback, not as a primary server)
+                (videoName.contains("upnshare") || url.contains("upns")) && url.endsWith(".mp4") -> extractedVideos += Video(url, "Upnshare", url)
                 videoName.contains("p2p") || url.contains("p2p") -> extractedVideos += Video(url, "P2P", url)
                 else -> extractedVideos += Video(url, video.quality.replaceFirstChar { it.uppercase() }, url)
             }
         }
-        return extractedVideos
-    }
-
-    // ---- SORT VIDEOS BY PRIORITY: filemoon > vidguard > rest ----
-    override fun List<Video>.sort(): List<Video> {
-        // Assign a priority: filemoon=2, vidguard=1, rest=0, then sort descending
-        return this.sortedWith(
+        // Always enforce priority order: filemoon > vidguard > rest
+        return extractedVideos.sortedWith(
             compareByDescending<Video> {
                 when {
                     it.quality.lowercase().contains("filemoon") -> 2
