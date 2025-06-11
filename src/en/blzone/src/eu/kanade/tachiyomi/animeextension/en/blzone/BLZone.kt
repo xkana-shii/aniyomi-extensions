@@ -242,12 +242,17 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return extractedVideos
     }
 
-    // ---- SORT VIDEOS BY PREFERENCE ----
+    // ---- SORT VIDEOS BY PRIORITY: filemoon > vidguard > rest ----
     override fun List<Video>.sort(): List<Video> {
-        val preferred = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
-        // Preferred servers first, others after
+        // Assign a priority: filemoon=2, vidguard=1, rest=0, then sort descending
         return this.sortedWith(
-            compareByDescending { it.quality.lowercase().contains(preferred) }
+            compareByDescending<Video> {
+                when {
+                    it.quality.lowercase().contains("filemoon") -> 2
+                    it.quality.lowercase().contains("vidguard") -> 1
+                    else -> 0
+                }
+            }
         )
     }
 }
