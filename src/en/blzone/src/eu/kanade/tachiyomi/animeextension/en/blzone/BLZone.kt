@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.en.blzone
 
-import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -13,12 +12,14 @@ import eu.kanade.tachiyomi.lib.mixdropextractor.MixDropExtractor
 import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
 import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.asJsoup
+import eu.kanade.tachiyomi.network.await
+import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Request
 import okhttp3.Response
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
-class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
+class BLZone : AnimeHttpSource() {
 
     override val name = "BLZone"
     override val baseUrl = "https://blzone.net"
@@ -26,10 +27,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     override val supportsLatest = true
 
     // ---- FILTERS ----
-    private enum class Type(
-        val path: String,
-        val display: String,
-    ) {
+    private enum class Type(val path: String, val display: String) {
         ANIME("anime", "Anime"),
         DRAMA("dorama", "Drama"),
         BOTH("", "Both"),
@@ -40,9 +38,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         arrayOf(Type.BOTH.display, Type.ANIME.display, Type.DRAMA.display),
     )
 
-    override fun getFilterList(): AnimeFilterList = AnimeFilterList(
-        TypeFilter(),
-    )
+    override fun getFilterList(): AnimeFilterList = AnimeFilterList(TypeFilter())
 
     private fun getTypeFromFilters(filters: AnimeFilterList): Type {
         val typeIndex = (filters.getOrNull(0) as? AnimeFilter.Select<*>)?.state ?: 0
@@ -54,9 +50,7 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     }
 
     // ---- POPULAR ----
-    override fun popularAnimeRequest(page: Int): Request {
-        return GET("$baseUrl/trending/", headers)
-    }
+    override fun popularAnimeRequest(page: Int): Request = GET("$baseUrl/trending/", headers)
 
     override fun popularAnimeParse(response: Response): AnimesPage {
         val document = response.asJsoup()
@@ -98,13 +92,12 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 // Ignore errors on drama
             }
         }
-
         return AnimesPage(animeList, hasNextPage = hasNextPage(document))
     }
 
     private fun latestAnimeFromElement(element: Element): SAnime = popularAnimeFromElement(element)
 
-    private fun hasNextPage(document: org.jsoup.nodes.Document): Boolean {
+    private fun hasNextPage(document: Document): Boolean {
         return document.selectFirst(".pagination .next:not(.disabled)") != null
     }
 
@@ -136,7 +129,8 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     }
 
     // ---- DETAILS ----
-    override fun animeDetailsParse(document: org.jsoup.nodes.Document): SAnime {
+    override fun animeDetailsParse(response: Response): SAnime {
+        val document = response.asJsoup()
         val anime = SAnime.create()
         val poster = document.selectFirst(".sheader .poster img")
         anime.title = document.selectFirst(".sheader .data h1")?.text() ?: poster?.attr("alt") ?: ""
@@ -167,19 +161,19 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return ep
     }
 
-    // ---- VIDEOS ----
+    // ---- VIDEO EXTRACTORS ----
     private val filemoonExtractor by lazy { FilemoonExtractor(client) }
     private val streamtapeExtractor by lazy { StreamTapeExtractor(client) }
     private val mixDropExtractor by lazy { MixDropExtractor(client) }
     private val vidGuardExtractor by lazy { VidGuardExtractor(client) }
 
+    // ---- VIDEO LIST PARSE ----
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
         val serverNames = document.select("#playeroptionsul li span.title").map { it.text().trim().lowercase() }
         val serverBoxes = document.select(".dooplay_player .source-box").drop(1)
 
         val videos = mutableListOf<BLZoneRawVideo>()
-
         serverBoxes.forEachIndexed { index, box ->
             val iframe = box.selectFirst("iframe.metaframe")
             val src = iframe?.attr("src")?.trim().orEmpty()
@@ -196,15 +190,15 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
         return videos.map { Video(it.url, it.name, it.url) }
     }
 
+    // ---- GET VIDEO LIST ----
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
-        val rawVideos = videoListParse(response)
+        val videos = videoListParse(response)
 
         val extractedVideos = mutableListOf<Video>()
-
-        for (rawVideo in rawVideos) {
-            val url = rawVideo.url
-            val name = rawVideo.name
+        for (video in videos) {
+            val url = video.url
+            val videoName = video.quality
             when {
                 url.contains("filemoon") -> {
                     extractedVideos += filemoonExtractor.videosFromUrl(url)
@@ -215,22 +209,20 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 url.contains("mixdrop") -> {
                     extractedVideos += mixDropExtractor.videosFromUrl(url)
                 }
-                url.contains("vgembed") || name.contains("vidguard") -> {
+                url.contains("vgembed") || videoName.contains("vidguard") -> {
                     extractedVideos += vidGuardExtractor.videosFromUrl(url)
                 }
-                // Upnshare, p2p, zoneplay: no extractors, pass as direct
-                name.contains("upnshare") || url.contains("upns") -> {
+                videoName.contains("upnshare") || url.contains("upns") -> {
                     extractedVideos += Video(url, "Upnshare", url)
                 }
-                name.contains("p2p") || url.contains("p2p") -> {
+                videoName.contains("p2p") || url.contains("p2p") -> {
                     extractedVideos += Video(url, "P2P", url)
                 }
-                name.contains("zoneplay") || url.contains("zoneplay") -> {
+                videoName.contains("zoneplay") || url.contains("zoneplay") -> {
                     extractedVideos += Video(url, "ZonePlay", url)
                 }
-                // fallback: direct iframe (may be playable)
                 else -> {
-                    extractedVideos += Video(url, name.replaceFirstChar { it.uppercase() }, url)
+                    extractedVideos += Video(url, videoName.replaceFirstChar { it.uppercase() }, url)
                 }
             }
         }
