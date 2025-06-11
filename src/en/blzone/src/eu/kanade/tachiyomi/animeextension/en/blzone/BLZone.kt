@@ -13,9 +13,9 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.lib.filemoonextractor.FilemoonExtractor
 import eu.kanade.tachiyomi.lib.mixdropextractor.MixDropExtractor
+import eu.kanade.tachiyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
 import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
-import eu.kanade.tachiyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.util.asJsoup
@@ -218,14 +218,15 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
         val html = response.body?.string().orEmpty()
-        val videos = videoListParse(Response.Builder()
-            .request(response.request)
-            .protocol(response.protocol)
-            .code(response.code)
-            .message(response.message)
-            .headers(response.headers)
-            .body(okhttp3.ResponseBody.create(response.body?.contentType(), html))
-            .build()
+        val videos = videoListParse(
+            Response.Builder()
+                .request(response.request)
+                .protocol(response.protocol)
+                .code(response.code)
+                .message(response.message)
+                .headers(response.headers)
+                .body(okhttp3.ResponseBody.create(response.body?.contentType(), html))
+                .build(),
         )
 
         val extractedVideos = mutableListOf<Video>()
