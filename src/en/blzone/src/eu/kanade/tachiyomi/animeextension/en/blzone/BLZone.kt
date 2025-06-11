@@ -227,7 +227,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 url.contains("vgembed") || name.contains("vidguard") -> {
                     extractedVideos += vidguardExtractor.videosFromUrl(url)
                 }
-                // Upnshare, p2p, zoneplay: no extractors, pass as direct
                 name.contains("upnshare") || url.contains("upns") -> {
                     extractedVideos += Video(url, "Upnshare", url)
                 }
@@ -237,7 +236,6 @@ class BLZone : ConfigurableAnimeSource, AnimeHttpSource() {
                 name.contains("zoneplay") || url.contains("zoneplay") -> {
                     extractedVideos += Video(url, "ZonePlay", url)
                 }
-                // fallback: direct iframe (may be playable)
                 else -> {
                     extractedVideos += Video(url, name.replaceFirstChar { it.uppercase() }, url)
                 }
