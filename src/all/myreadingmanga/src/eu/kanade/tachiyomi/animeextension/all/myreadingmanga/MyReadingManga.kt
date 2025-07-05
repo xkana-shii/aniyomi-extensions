@@ -1,7 +1,5 @@
-// myreadingmanga.kt (transformed for Aniyomi anime extension - Video Content Only with Type Filters & Category Path Handling)
 package eu.kanade.tachiyomi.animeextension.all.myreadingmanga
 
-import android.annotation.SuppressLint
 import android.net.Uri
 import android.webkit.URLUtil
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
@@ -218,7 +216,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     // cleans up the name removing author and language from the title
-    private val titleRegex = Regex("""\[[^]]*]""")
+    private val titleRegex = Regex("""^(\w+):|\[[^\]]*\]|\([^)]*\)""")
     private fun cleanTitle(title: String) = title.replace(titleRegex, "").substringBeforeLast("(").trim()
 
     private fun cleanAuthor(author: String) = author.substringAfter("[").substringBefore("]").trim()
@@ -236,20 +234,51 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     private fun animeDetailsParse(document: Document, needCover: Boolean = true): SAnime {
         return SAnime.create().apply {
-            title = cleanTitle(document.select("h1").text())
-            author = cleanAuthor(document.select("h1").text())
+            title = cleanTitle(document.select("h1.entry-title").text()) // Use h1.entry-title for more specific targeting
+            author = cleanAuthor(document.select("h1.entry-title").text()) // Use h1.entry-title for author extraction
             artist = author
-            genre = document.select(".entry-header p a[href*=genre], [href*=tag], span.entry-categories a").joinToString { it.text() }
-            val basicDescription = document.select("h1").text()
-            val scanlatedBy = document.select(".entry-terms:has(a[href*=group])").firstOrNull()
-                ?.select("a[href*=group]")?.joinToString(prefix = "Scanlated by: ") { it.text() }
-            val extendedDescription = document.select(".entry-content p:not(p:containsOwn(|)):not(.chapter-class + p)").joinToString("\n") { it.text() }
-            description = listOfNotNull(basicDescription, scanlatedBy, extendedDescription).joinToString("\n").trim()
-            status = when (document.select("a[href*=status]").first()?.text()) {
+
+            // Extract Type (assuming it's a category link in the header)
+            type = document.select("p.entry-meta a[rel=category tag]").firstOrNull()?.text() ?: "Unknown"
+
+            // Extract Genre
+            genre = document.select(".entry-terms a[href*=/genre/]").joinToString { it.text() }
+            if (genre.isBlank()) { // Fallback if direct genre link not found, look for tags related to genre
+                genre = document.select(".entry-tags a[rel=tag]").filter { it.text().contains("yaoi", ignoreCase = true) || it.text().contains("shounen-ai", ignoreCase = true) }.joinToString { it.text() }
+            }
+
+            // Extract Language
+            language = document.select(".entry-terms a[href*=/language/]").firstOrNull()?.text() ?: "Unknown"
+            if (language.isBlank()) { // Fallback, check tags for language
+                language = document.select(".entry-tags a[rel=tag]").filter { it.text().contains("eng dub", ignoreCase = true) || it.text().contains("eng sub", ignoreCase = true) }.joinToString { it.text() }
+            }
+
+            // Extract Status
+            status = when (document.select(".entry-terms a[href*=/status/]").firstOrNull()?.text()) {
                 "Ongoing" -> SAnime.ONGOING
                 "Completed" -> SAnime.COMPLETED
                 else -> SAnime.UNKNOWN
             }
+
+            // Extract Tags
+            tags = document.select(".entry-tags a[rel=tag]").joinToString { it.text() }
+
+            // Description - combine existing elements and add tags for better description
+            val basicDescription = document.select("h1.entry-title").text()
+            val scanlatedBy = document.select(".entry-terms:has(a[href*=group])").firstOrNull()
+                ?.select("a[href*=group]")?.joinToString(prefix = "Scanlated by: ") { it.text() }
+            val extendedDescription = document.select(".entry-content p:not(p:containsOwn(|)):not(.chapter-class + p)").joinToString("\n") { it.text() }
+
+            description = listOfNotNull(
+                basicDescription,
+                scanlatedBy,
+                "Type: ${type}",
+                "Genre: ${genre}",
+                "Language: ${language}",
+                "Status: ${status}",
+                "Tags: ${tags}",
+                extendedDescription
+            ).joinToString("\n").trim()
 
             if (needCover) {
                 thumbnail_url = getThumbnail(
@@ -267,7 +296,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     // ============================== Episodes ==============================
     override fun episodeListSelector() = "irrelevant" // We will create episode manually
 
-    @SuppressLint("DefaultLocale")
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.asJsoup()
         val episodes = mutableListOf<SEpisode>()
@@ -287,7 +315,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
             val episode = SEpisode.create().apply {
                 url = animeUrl
-                name = document.select("h1").text() // Use the title as the episode name
+                name = document.select("h1.entry-title").text() // Use the cleaned title as the episode name
                 date_upload = date
                 episode_number = 1F // Assume single episode for now
             }
@@ -306,27 +334,37 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun videoListParse(document: Document): List<Video> {
         val videos = mutableListOf<Video>()
 
-        // Look for video elements
-        val videoElements = document.select("div.entry-content video source, div.entry-content iframe")
+        // Look for video elements. The HTML snippet you provided confirms the structure.
+        val videoSourceTag = document.select("video#MRM_video_html5_api source[type=video/mp4]").first()
 
-        videoElements.forEach { element ->
-            val videoUrl = if (element.tagName() == "source") {
-                element.attr("src")
-            } else { // iframe
-                element.attr("src")
-            }
+        if (videoSourceTag != null) {
+            val videoUrl = videoSourceTag.attr("src")
 
             if (URLUtil.isValidUrl(videoUrl)) {
-                // Try to infer quality or use a generic name
-                val quality = if (videoUrl.contains("1080p")) "1080p"
-                else if (videoUrl.contains("720p")) "720p"
-                else if (videoUrl.contains("480p")) "480p"
-                else if (videoUrl.contains("360p")) "360p"
-                else "Default"
-
-                videos.add(Video(videoUrl, quality, videoUrl, headers = headers)) // Pass headers for potential referer issues
+                // Try to infer quality from the URL or use a generic name
+                val quality = when {
+                    videoUrl.contains("1080p", ignoreCase = true) -> "1080p"
+                    videoUrl.contains("720p", ignoreCase = true) -> "720p"
+                    videoUrl.contains("480p", ignoreCase = true) -> "480p"
+                    videoUrl.contains("360p", ignoreCase = true) -> "360p"
+                    else -> "Default" // A generic quality if no specific resolution is found
+                }
+                videos.add(Video(videoUrl, quality, videoUrl, headers = headers))
             }
         }
+
+        // Also check for iframes, though the primary focus for MyReadingManga videos seems to be direct MP4s
+        val iframeElements = document.select("div.entry-content iframe")
+        iframeElements.forEach { element ->
+            val iframeSrc = element.attr("src")
+            if (URLUtil.isValidUrl(iframeSrc) && !iframeSrc.contains("youtube.com") && !iframeSrc.contains("twitter.com")) {
+                // You might need more sophisticated logic here to determine if it's a direct video link
+                // or an embed from another video host that Aniyomi can handle.
+                // For now, adding it as a "Generic Embed"
+                videos.add(Video(iframeSrc, "Generic Embed", iframeSrc, headers = headers))
+            }
+        }
+
         return videos.distinctBy { it.videoUrl } // Avoid duplicate video URLs
     }
 
