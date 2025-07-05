@@ -63,13 +63,10 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return GET("$baseUrl/search/?wpsolr_sort=sort_by_date_desc&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers) // Search - Latest Anime
     }
 
-    override fun latestUpdatesNextPageSelector() = "li.pagination-next"
-    override fun latestUpdatesSelector() = "article"
-    override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
-    override fun latestUpdatesParse(response: Response): AnimesPage {
-        cacheAssistant()
-        return super.latestUpdatesParse(response)
-    }
+    override fun latestUpdatesNextPageSelector() = throw UnsupportedOperationException()
+    override fun latestUpdatesSelector() = throw UnsupportedOperationException()
+    override fun latestUpdatesFromElement(element: Element): SAnime = throw UnsupportedOperationException()
+    override fun latestUpdatesParse(response: Response): AnimesPage = throw UnsupportedOperationException()
 
     // Search
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
@@ -239,8 +236,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             return emptyList()
         }
 
-        // Assuming the direct MP4 link is the highest quality available.
-        // You might want to parse quality if it's indicated in the filename or page.
         val quality = "Default" // You can try to extract quality from the URL if needed, e.g., videoUrl.substringAfterLast("/").substringBefore(".mp4")
         return listOf(Video(videoUrl, quality, videoUrl, headers))
     }
