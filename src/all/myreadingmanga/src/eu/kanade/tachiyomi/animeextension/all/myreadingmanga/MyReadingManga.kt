@@ -1,4 +1,4 @@
-// myreadingmanga.kt (transformed for Aniyomi anime extension)
+// myreadingmanga.kt (transformed for Aniyomi anime extension - Video Content Only with Type Filters & Category Path Handling)
 package eu.kanade.tachiyomi.animeextension.all.myreadingmanga
 
 import android.annotation.SuppressLint
@@ -120,12 +120,33 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val filterList = if (filters.isEmpty()) getFilterList() else filters
         var indexModifier = 0 // To keep track of filter indices for wpsolr_fq
 
-        val uri = Uri.parse("$baseUrl/search/").buildUpon()
-            .appendQueryParameter("wpsolr_q", query)
+        var baseUrlForSearch = "$baseUrl/search/"
+        var selectedCategoryPath: String? = null
+        var isVideoCategorySelected = false
+
+        // Check for selected category filter first to change the base URL
+        filterList.forEach { filter ->
+            if (filter is CatFilter && filter.state != 0) { // If a category is selected (not "Any")
+                selectedCategoryPath = filter.vals[filter.state].second // Get the path
+                baseUrlForSearch = "$baseUrl/$selectedCategoryPath/" // Set the new base URL
+                if (selectedCategoryPath == "video") { // Check if the selected category is "video"
+                    isVideoCategorySelected = true
+                }
+            }
+        }
+
+        val uri = Uri.parse(baseUrlForSearch).buildUpon()
+            .appendQueryParameter("wpsolr_q", query) // Always append the search query
 
         filterList.forEachIndexed { i, filter ->
+            // Skip the CatFilter if it was used to construct the base URL
+            if (filter is CatFilter && filter.state != 0) {
+                indexModifier++ // Adjust index for subsequent wpsolr_fq filters
+                return@forEachIndexed // Continue to the next filter
+            }
+
             if (filter is EnforceLanguageFilter && !filter.state) {
-                indexModifier++ // If language filter is unchecked, it doesn't add to wpsolr_fq, so adjust index
+                indexModifier++
             }
             if (filter is UriFilter) {
                 filter.addToUri(uri, "wpsolr_fq[${i - indexModifier}]")
@@ -134,8 +155,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 uri.appendQueryParameter("wpsolr_sort", listOf("sort_by_date_desc", "sort_by_date_asc", "sort_by_random", "sort_by_relevancy_desc")[filter.state])
             }
         }
-        // Force search results to include 'video' category
-        uri.appendQueryParameter("wpsolr_fq[${filterList.size - indexModifier + 1}]", "category:video") // +1 to account for this filter itself
+
+        // Force search results to include 'video' category, unless the base URL is already a video category.
+        // This ensures that even when Browse a specific category, we still filter for videos within it.
+        if (!isVideoCategorySelected) {
+            uri.appendQueryParameter("wpsolr_fq[${filterList.size - indexModifier + 1}]", "category:video")
+        }
 
         uri.appendQueryParameter("wpsolr_page", page.toString())
 
@@ -143,21 +168,31 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun searchAnimeNextPageSelector(): String? = throw UnsupportedOperationException() // Pagination for search is often tricky with custom filters
-    override fun searchAnimeSelector() = "div.results-by-facets div[id*=res].category-video" // Filter search results
+    override fun searchAnimeSelector() = "div.results-by-facets div[id*=res].category-video, div.content-archive article.category-video" // Filter search results and category archives
     private var animeParsedSoFar = 0
     override fun searchAnimeParse(response: Response): AnimesPage {
         val document = response.asJsoup()
         if (document.location().contains("page=1")) animeParsedSoFar = 0
+
+        // Use a more general selector that works for both search results and category archives
         val animes = document.select(searchAnimeSelector()).map { element ->
-            // Re-use buildAnimeFromVideoElement for consistency, ensure it works with search result elements
             SAnime.create().apply {
-                setUrlWithoutDomain(element.select("a").first()?.attr("href") ?: throw Exception("URL not found"))
-                title = cleanTitle(element.select("a").first()?.text() ?: "")
+                setUrlWithoutDomain(element.select("a.entry-title-link").first()?.attr("href") ?: throw Exception("URL not found"))
+                title = cleanTitle(element.select("h2.entry-title").text())
                 thumbnail_url = getThumbnail(getImage(element.select("img").firstOrNull()))
             }
         }.also { animeParsedSoFar += it.count() }
+
+        // This 'totalResults' is typically for the /search/ page and might not be present on category archives
         val totalResults = Regex("""(\d+)""").find(document.select("div.res_info").text())?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        return AnimesPage(animes, animeParsedSoFar < totalResults)
+
+        // Check for next page based on pagination elements (for category archives)
+        val hasNextPageFromSelector = document.select("li.pagination-next").first() != null
+
+        // If we are on a search results page (where totalResults might be valid) and not all results are parsed yet
+        val hasNextPageFromCount = totalResults > 0 && animeParsedSoFar < totalResults
+
+        return AnimesPage(animes, hasNextPageFromSelector || hasNextPageFromCount)
     }
     override fun searchAnimeFromElement(element: Element) = throw UnsupportedOperationException() // Use custom logic in searchAnimeParse
 
@@ -262,7 +297,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     private fun parseDate(date: String): Long {
-        return SimpleDateFormat("MMM dd, yyyy", Locale.US).parse(date)?.time ?: 0
+        return SimpleDateFormat("MMM dd,yyyy", Locale.US).parse(date)?.time ?: 0
     }
 
     override fun episodeFromElement(element: Element) = throw UnsupportedOperationException()
@@ -316,7 +351,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     // Parses cached page for filters
-    private fun returnFilter(url: String, css: String): Array<String> {
+    private fun returnFilter(url: String, css: String): Array<Pair<String, String>> {
         val document = if (filterMap.isNullOrEmpty()) {
             filtersCached = false
             null
@@ -324,25 +359,32 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             Jsoup.parse(filterMap[url]!!)
         }
-        return document?.select(css)?.map { it.text() }?.toTypedArray()
-            ?: arrayOf("Press 'Reset' to load filters")
+        // For categories, we need both the display name and the URL slug
+        return document?.select(css)?.map {
+            val href = it.attr("href")
+            val slug = href.substringAfterLast("/").removeSuffix("/")
+            Pair(it.text(), slug)
+        }?.toTypedArray() ?: arrayOf(Pair("Press 'Reset' to load filters", ""))
     }
 
     // URLs for the pages we need to cache
     private val cachedPagesUrls = hashMapOf(
         Pair("genres", baseUrl),
-        Pair("tags", baseUrl), // This is too broad, we only need specific video tags
-        Pair("categories", "$baseUrl/cats/"),
+        Pair("tags", baseUrl),
+        Pair("categories", "$baseUrl/cats/"), // This page lists all categories
         Pair("pairings", "$baseUrl/pairing/"),
         Pair("groups", "$baseUrl/group/"),
     )
 
     // Generates the filter lists for app
     override fun getFilterList(): AnimeFilterList {
+        // Fetch categories with their slugs
+        val categoriesWithSlugs = returnFilter(cachedPagesUrls["categories"]!!, ".links a")
+
         return AnimeFilterList(
             EnforceLanguageFilter(siteLang),
             SearchSortTypeList(),
-            // New Content Type Filter
+            // Content Type Filter
             ContentTypeFilter(
                 arrayOf(
                     "Any",
@@ -353,11 +395,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                     "tv-series",
                 ),
             ),
-            GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]")),
-            TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tagcloud a[href*=/tag/]")), // This might still be useful for other tags
-            CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".links a")),
-            PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".links a")),
-            ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".links a")),
+            GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]").map { it.first }.toTypedArray()),
+            TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tagcloud a[href*=/tag/]").map { it.first }.toTypedArray()),
+            CatFilter(arrayOf(Pair("Any", ""), *categoriesWithSlugs)), // Add "Any" option
+            PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".links a").map { it.first }.toTypedArray()),
+            ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".links a").map { it.first }.toTypedArray()),
         )
     }
 
@@ -368,12 +410,17 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
-    // New ContentTypeFilter
+    // ContentTypeFilter
     private class ContentTypeFilter(CONTENT_TYPES: Array<String>) : UriSelectFilter("Content Type", "tag", CONTENT_TYPES)
 
     private class GenreFilter(GENRES: Array<String>) : UriSelectFilter("Genre", "genre_str", arrayOf("Any", *GENRES))
     private class TagFilter(POPTAG: Array<String>) : UriSelectFilter("Popular Tags", "tags", arrayOf("Any", *POPTAG))
-    private class CatFilter(CATID: Array<String>) : UriSelectFilter("Categories", "categories", arrayOf("Any", *CATID))
+
+    // Modified CatFilter to include slug
+    private class CatFilter(CATID: Array<Pair<String, String>>) : AnimeFilter.Select<String>("Categories", CATID.map { it.first }.toTypedArray()) {
+        val vals = CATID // Store the pairs
+    }
+
     private class PairingFilter(PAIR: Array<String>) : UriSelectFilter("Pairing", "pairing_str", arrayOf("Any", *PAIR))
     private class ScanGroupFilter(GROUP: Array<String>) : UriSelectFilter("Scanlation Group", "group_str", arrayOf("Any", *GROUP))
     private class SearchSortTypeList : AnimeFilter.Select<String>("Sort by", arrayOf("Newest", "Oldest", "Random", "More relevant"))
