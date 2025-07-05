@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+
+import sys
+assert sys.version_info >= (3, 12), "Requires Python 3.12+"
+
 import itertools
 import json
 import os
@@ -9,7 +14,7 @@ from typing import NoReturn
 
 EXTENSION_REGEX = re.compile(r"^src/(?P<lang>\w+)/(?P<extension>\w+)")
 MULTISRC_LIB_REGEX = re.compile(r"^lib-multisrc/(?P<multisrc>\w+)")
-LIB_REGEX = re.compile(r"^lib/(?P<lib>\w+)")
+LIB_REGEX = re.compile(r"^lib/(?P<lib>[\w-]+)")
 MODULE_REGEX = re.compile(r"^:src:(?P<lang>\w+):(?P<extension>\w+)$")
 CORE_FILES_REGEX = re.compile(
     r"^(buildSrc/|core/|gradle/|build\.gradle\.kts|common\.gradle|gradle\.properties|settings\.gradle\.kts|utils/)"
@@ -56,7 +61,7 @@ def get_module_list(ref: str) -> tuple[list[str], list[str]]:
         deleted.add(f"{lang}.{extension}")
         return True
 
-    if len(libs) != 0 and not core_files_changed:
+    if libs and not core_files_changed:
         modules.update([
             module for module in
             run_command("./gradlew -q " + " ".join(libs)).splitlines()
