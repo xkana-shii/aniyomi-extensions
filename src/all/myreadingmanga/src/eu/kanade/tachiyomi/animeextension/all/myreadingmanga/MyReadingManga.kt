@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.animeextension.all.myreadingmanga
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.webkit.CookieManager
 import android.webkit.URLUtil
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
@@ -230,27 +231,32 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
-        val videoUrl = document.selectFirst("div.video-container-ads video source")?.attr("src")
+        val videoUrl = videoUrlParse(document)
 
-        if (videoUrl.isNullOrEmpty()) {
+        if (videoUrl.isEmpty()) {
             return emptyList()
         }
 
-        val quality = "Default"
-        // Clone the headers from "basic info" and add Referer for this specific request
+        val cookieManager = CookieManager.getInstance()
+        val cookies = cookieManager.getCookie(videoUrl)
+
         val customHeaders = headers.newBuilder()
             .set("Referer", response.request.url.toString())
+            .apply {
+                if (!cookies.isNullOrEmpty()) {
+                    set("Cookie", cookies)
+                }
+            }
             .build()
 
-        return listOf(Video(videoUrl, quality, videoUrl, customHeaders))
+        return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
     }
 
-    override fun videoListSelector(): String {
-        TODO("Not yet implemented")
-    }
+    override fun videoListSelector(): String = "div.video-container-ads video source"
 
     override fun videoUrlParse(document: Document): String {
-        TODO("Not yet implemented")
+        return document.selectFirst("div.video-container-ads video source")?.attr("src")
+            ?: throw Exception("No video URL found")
     }
 
     // Filter Parsing, grabs pages as document and filters out Genres, Popular Tags, and Categories, Parings, and Scan Groups
@@ -272,7 +278,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Parses cached page for filters
     private fun returnFilter(url: String, css: String): Array<String> {
-        val document = if (filterMap.isNullOrEmpty()) {
+        val document = if (filterMap.isEmpty()) {
             filtersCached = false
             null
         } else {
