@@ -48,7 +48,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override val supportsLatest = true
 
     // --- Selectors common to Popular, Latest, and Search (for video entries) ---
-    // We'll primarily target articles categorized as "video"
     private val VIDEO_ARTICLE_SELECTOR = "article.category-video"
 
     private fun buildAnimeFromVideoElement(element: Element): SAnime {
@@ -119,12 +118,15 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val filterList = if (filters.isEmpty()) getFilterList() else filters
-        val indexModifier = filterList.filterIsInstance<EnforceLanguageFilter>().first().indexModifier()
+        var indexModifier = 0 // To keep track of filter indices for wpsolr_fq
 
         val uri = Uri.parse("$baseUrl/search/").buildUpon()
             .appendQueryParameter("wpsolr_q", query)
 
         filterList.forEachIndexed { i, filter ->
+            if (filter is EnforceLanguageFilter && !filter.state) {
+                indexModifier++ // If language filter is unchecked, it doesn't add to wpsolr_fq, so adjust index
+            }
             if (filter is UriFilter) {
                 filter.addToUri(uri, "wpsolr_fq[${i - indexModifier}]")
             }
@@ -133,7 +135,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             }
         }
         // Force search results to include 'video' category
-        uri.appendQueryParameter("wpsolr_fq[${filterList.size - indexModifier}]", "category:video")
+        uri.appendQueryParameter("wpsolr_fq[${filterList.size - indexModifier + 1}]", "category:video") // +1 to account for this filter itself
+
         uri.appendQueryParameter("wpsolr_page", page.toString())
 
         return GET(uri.toString(), headers)
@@ -227,7 +230,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun animeDetailsParse(document: Document) = throw UnsupportedOperationException()
 
     // ============================== Episodes ==============================
-    // For animated content, usually there's one "episode" per entry unless multi-part
     override fun episodeListSelector() = "irrelevant" // We will create episode manually
 
     @SuppressLint("DefaultLocale")
@@ -237,7 +239,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
         // Check if it's actually a video page by looking for the "Video" category
         val isVideoContent = document.select("article.category-video").first() != null ||
-            document.select("h1").text().contains("Animation:", ignoreCase = true)
+            document.select("h1").text().contains("Animation:", ignoreCase = true) ||
+            document.select("h1").text().contains("Anime:", ignoreCase = true) ||
+            document.select("h1").text().contains("Movie:", ignoreCase = true) ||
+            document.select("h1").text().contains("Live Action:", ignoreCase = true) ||
+            document.select("h1").text().contains("TV Series:", ignoreCase = true)
+
 
         if (isVideoContent) {
             val date = parseDate(document.select(".entry-time").text())
@@ -324,7 +331,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     // URLs for the pages we need to cache
     private val cachedPagesUrls = hashMapOf(
         Pair("genres", baseUrl),
-        Pair("tags", baseUrl),
+        Pair("tags", baseUrl), // This is too broad, we only need specific video tags
         Pair("categories", "$baseUrl/cats/"),
         Pair("pairings", "$baseUrl/pairing/"),
         Pair("groups", "$baseUrl/group/"),
@@ -335,12 +342,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return AnimeFilterList(
             EnforceLanguageFilter(siteLang),
             SearchSortTypeList(),
-            // Only add categories relevant to video content if possible, or leave as is if general
+            // New Content Type Filter
+            ContentTypeFilter(
+                arrayOf(
+                    "Any",
+                    "anime",
+                    "movie",
+                    "short-films",
+                    "live-action",
+                    "tv-series",
+                ),
+            ),
             GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]")),
-            TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tagcloud a[href*=/tag/]")),
-            // We need to ensure that the "Video" category is always implicitly applied for search.
-            // A direct category filter might conflict if not handled carefully, so keeping it generic
-            // for search and adding "category:video" in searchAnimeRequest is safer.
+            TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tagcloud a[href*=/tag/]")), // This might still be useful for other tags
             CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".links a")),
             PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".links a")),
             ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".links a")),
@@ -353,6 +367,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             if (state) uri.appendQueryParameter(uriParam, "lang_str:$siteLang")
         }
     }
+
+    // New ContentTypeFilter
+    private class ContentTypeFilter(CONTENT_TYPES: Array<String>) : UriSelectFilter("Content Type", "tag", CONTENT_TYPES)
 
     private class GenreFilter(GENRES: Array<String>) : UriSelectFilter("Genre", "genre_str", arrayOf("Any", *GENRES))
     private class TagFilter(POPTAG: Array<String>) : UriSelectFilter("Popular Tags", "tags", arrayOf("Any", *POPTAG))
@@ -371,14 +388,17 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         AnimeFilter.Select<String>(displayName, vals.map { it }.toTypedArray(), defaultValue), UriFilter {
         override fun addToUri(uri: Uri.Builder, uriParam: String) {
             if (state != 0 || !firstIsUnspecified) {
-                val splitFilter = vals[state].split(",")
-                when {
-                    splitFilter.size == 2 -> {
-                        val reversedFilter = splitFilter.reversed().joinToString(" | ").trim()
-                        uri.appendQueryParameter(uriParam, "$uriValuePrefix:$reversedFilter")
-                    }
-                    else -> {
-                        uri.appendQueryParameter(uriParam, "$uriValuePrefix:${vals[state]}")
+                val selectedValue = vals[state]
+                if (selectedValue != "Any") { // Only append if not "Any"
+                    val splitFilter = selectedValue.split(",")
+                    when {
+                        splitFilter.size == 2 -> {
+                            val reversedFilter = splitFilter.reversed().joinToString(" | ").trim()
+                            uri.appendQueryParameter(uriParam, "$uriValuePrefix:$reversedFilter")
+                        }
+                        else -> {
+                            uri.appendQueryParameter(uriParam, "$uriValuePrefix:${selectedValue}")
+                        }
                     }
                 }
             }
