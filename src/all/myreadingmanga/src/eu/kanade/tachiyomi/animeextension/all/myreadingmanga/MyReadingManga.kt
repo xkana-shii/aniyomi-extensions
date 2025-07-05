@@ -236,8 +236,13 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             return emptyList()
         }
 
-        val quality = "Default" // You can try to extract quality from the URL if needed, e.g., videoUrl.substringAfterLast("/").substringBefore(".mp4")
-        return listOf(Video(videoUrl, quality, videoUrl, headers))
+        val quality = "Default"
+        // Clone the headers from "basic info" and add Referer for this specific request
+        val customHeaders = headers.newBuilder()
+            .set("Referer", response.request.url.toString())
+            .build()
+
+        return listOf(Video(videoUrl, quality, videoUrl, customHeaders))
     }
 
     override fun videoListSelector(): String {
