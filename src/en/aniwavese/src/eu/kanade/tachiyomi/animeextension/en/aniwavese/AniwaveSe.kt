@@ -16,11 +16,7 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
-import eu.kanade.tachiyomi.lib.filemoonextractor.FilemoonExtractor
-import eu.kanade.tachiyomi.lib.mp4uploadextractor.Mp4uploadExtractor
 import eu.kanade.tachiyomi.lib.playlistutils.PlaylistUtils
-import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
-import eu.kanade.tachiyomi.lib.vidsrcextractor.VidsrcExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.util.asJsoup
 import eu.kanade.tachiyomi.util.parallelFlatMapBlocking
@@ -109,7 +105,7 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     // =============================== Search ===============================
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
-        val filters = AniwaveSeFilters.getSearchParameters(filters)
+        val searchParams = AniwaveSeFilters.getSearchParameters(filters)
 
         val vrf = if (query.isNotBlank()) utils.vrfEncrypt(query) else ""
         var url = baseUrl.toHttpUrl().newBuilder().apply {
@@ -117,16 +113,16 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             addQueryParameter("keyword", query)
         }.build().toString()
 
-        if (filters.genre.isNotBlank()) url += filters.genre
-        if (filters.genreMode.isNotBlank()) url += filters.genreMode
-        if (filters.country.isNotBlank()) url += filters.country
-        if (filters.season.isNotBlank()) url += filters.season
-        if (filters.year.isNotBlank()) url += filters.year
-        if (filters.type.isNotBlank()) url += filters.type
-        if (filters.status.isNotBlank()) url += filters.status
-        if (filters.language.isNotBlank()) url += filters.language
-        if (filters.rating.isNotBlank()) url += filters.rating
-        if (filters.sort.isNotBlank()) url += "&sort=${filters.sort}"
+        if (searchParams.genre.isNotBlank()) url += searchParams.genre
+        if (searchParams.genreMode.isNotBlank()) url += searchParams.genreMode
+        if (searchParams.country.isNotBlank()) url += searchParams.country
+        if (searchParams.season.isNotBlank()) url += searchParams.season
+        if (searchParams.year.isNotBlank()) url += searchParams.year
+        if (searchParams.type.isNotBlank()) url += searchParams.type
+        if (searchParams.status.isNotBlank()) url += searchParams.status
+        if (searchParams.language.isNotBlank()) url += searchParams.language
+        if (searchParams.rating.isNotBlank()) url += searchParams.rating
+        if (searchParams.sort.isNotBlank()) url += "&sort=${searchParams.sort}"
 
         return GET("$url&page=$page&vrf=$vrf", refererHeaders)
     }
@@ -183,22 +179,24 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             add("X-Requested-With", "XMLHttpRequest")
         }.build()
 
-        return GET("$baseUrl/ajax/episode/list/$id?vrf=$vrf#${anime.url}", listHeaders)
+        return GET("$baseUrl/ajax/episode/list/$id?vrf=$vrf", listHeaders)
     }
 
     override fun episodeListSelector() = "div.episodes ul > li > a"
 
     override fun episodeListParse(response: Response): List<SEpisode> {
-        val animeUrl = response.request.url.fragment!!
+        val referer = response.request.header("Referer")
+            ?: throw IllegalStateException("Referrer header not found in request")
+        val animeUrl = referer.toHttpUrl().encodedPath
         val document = response.parseAs<ResultResponse>().toDocument()
 
         val episodeElements = document.select(episodeListSelector())
-        return episodeElements.parallelMapBlocking { episodeFromElements(it, animeUrl) }.reversed()
+        return episodeElements.parallelMapBlocking { episodeFromElement(it, animeUrl) }.reversed()
     }
 
     override fun episodeFromElement(element: Element): SEpisode = throw UnsupportedOperationException()
 
-    private fun episodeFromElements(element: Element, url: String): SEpisode {
+    private fun episodeFromElement(element: Element, animeUrl: String): SEpisode {
         val title = element.parent()?.attr("title") ?: ""
 
         val epNum = element.attr("data-num")
@@ -218,7 +216,7 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         return SEpisode.create().apply {
             this.name = "Episode $epNum" +
                 if (name.isNotEmpty() && name != namePrefix) ": $name" else ""
-            this.url = "$ids&epurl=$url/ep-$epNum"
+            this.url = "$ids&epurl=$animeUrl/ep-$epNum"
             episode_number = epNum.toFloat()
             date_upload = RELEASE_REGEX.find(title)?.let {
                 parseDate(it.groupValues[1])
@@ -241,7 +239,7 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             add("X-Requested-With", "XMLHttpRequest")
         }.build()
 
-        return GET("$baseUrl$url#$epurl", listHeaders)
+        return GET("$baseUrl$url", listHeaders)
     }
 
     data class VideoData(
@@ -251,7 +249,9 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     )
 
     override fun videoListParse(response: Response): List<Video> {
-        val epurl = response.request.url.fragment!!
+        val referer = response.request.header("Referer")
+            ?: throw IllegalStateException("Referrer header not found in request")
+        val epurl = referer.toHttpUrl().encodedPath
         val document = response.parseAs<ResultResponse>().toDocument()
         val hosterSelection = getHosters()
         val typeSelection = preferences.getStringSet(PREF_TYPE_TOGGLE_KEY, PREF_TYPES_TOGGLE_DEFAULT)!!
@@ -279,10 +279,10 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     // ============================= Utilities ==============================
 
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
-    private val vidsrcExtractor by lazy { VidsrcExtractor(client, headers) }
-    private val filemoonExtractor by lazy { FilemoonExtractor(client) }
-    private val streamtapeExtractor by lazy { StreamTapeExtractor(client) }
-    private val mp4uploadExtractor by lazy { Mp4uploadExtractor(client) }
+//    private val vidsrcExtractor by lazy { VidsrcExtractor(client, headers) }
+//    private val filemoonExtractor by lazy { FilemoonExtractor(client) }
+//    private val streamtapeExtractor by lazy { StreamTapeExtractor(client) }
+//    private val mp4uploadExtractor by lazy { Mp4uploadExtractor(client) }
 
     private fun extractVideo(server: VideoData, epUrl: String): List<Video> {
         /**
@@ -436,7 +436,7 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     }
 
     companion object {
-        private const val DOMAIN = "aniwave.se"
+        private const val DOMAIN = "ww.aniwave.se"
 
         private val SOFTSUB_REGEX by lazy { Regex("""\bsoftsub\b""", RegexOption.IGNORE_CASE) }
         private val RELEASE_REGEX by lazy { Regex("""Release: (\d+/\d+/\d+ \d+:\d+)""") }
@@ -500,7 +500,7 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             key = PREF_DOMAIN_KEY
             title = "Preferred domain"
             entries = arrayOf(DOMAIN)
-            entryValues = arrayOf("https://$DOMAIN")
+            entryValues = arrayOf(PREF_DOMAIN_DEFAULT)
             setDefaultValue(PREF_DOMAIN_DEFAULT)
             summary = "%s"
 
@@ -616,7 +616,7 @@ class AniwaveSe : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                     preferences.edit().putString(key, newDomain).apply()
                     true
                 } else {
-                    Toast.makeText(screen.context, "Invalid url. Url example: https://$DOMAIN", Toast.LENGTH_LONG).show()
+                    Toast.makeText(screen.context, "Invalid url. Url example: $PREF_DOMAIN_DEFAULT", Toast.LENGTH_LONG).show()
                     false
                 }
             }

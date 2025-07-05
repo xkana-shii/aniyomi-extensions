@@ -1,8 +1,7 @@
 ext {
-    extKmkVersionCode = 3
     extName = 'Serieskao'
     extClass = '.Serieskao'
-    extVersionCode = 6
+    extVersionCode = 9
 }
 
 apply from: "$rootDir/common.gradle"
@@ -28,5 +27,4 @@ dependencies {
     implementation(project(':lib:vidguard-extractor'))
     implementation(project(':lib:universal-extractor'))
     implementation(project(':lib:cryptoaes'))
-    implementation(libs.jsunpacker)
 }

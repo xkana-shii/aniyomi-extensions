@@ -1,8 +1,7 @@
 ext {
-    extKmkVersionCode = 1
     extName = 'Myanime'
     extClass = '.Myanime'
-    extVersionCode = 7
+    extVersionCode = 8
 }
 
 apply from: "$rootDir/common.gradle"
@@ -11,5 +10,4 @@ dependencies {
     implementation(project(':lib:dailymotion-extractor'))
     implementation(project(':lib:gdriveplayer-extractor'))
     implementation(project(':lib:okru-extractor'))
-    implementation(libs.jsunpacker)
 }

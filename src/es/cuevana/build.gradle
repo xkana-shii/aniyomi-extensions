@@ -1,8 +1,7 @@
 ext {
-    extKmkVersionCode = 3
     extName = 'Cuevana'
     extClass = '.CuevanaFactory'
-    extVersionCode = 48
+    extVersionCode = 51
 }
 
 apply from: "$rootDir/common.gradle"
@@ -24,5 +23,4 @@ dependencies {
     implementation(project(':lib:fastream-extractor'))
     implementation(project(':lib:upstream-extractor'))
     implementation(project(':lib:universal-extractor'))
-    implementation(libs.jsunpacker)
 }

@@ -1,8 +1,7 @@
 ext {
-    extKmkVersionCode = 4
     extName = 'YoMovies'
     extClass = '.YoMovies'
-    extVersionCode = 24
+    extVersionCode = 28
     isNsfw = true
 }
 
@@ -11,6 +10,5 @@ apply from: "$rootDir/common.gradle"
 dependencies {
     implementation(project(':lib:dood-extractor'))
     implementation(project(':lib:mixdrop-extractor'))
-    implementation(libs.jsunpacker)
     implementation(project(':lib:playlist-utils'))
 }

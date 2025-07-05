@@ -62,17 +62,13 @@ jobs:
         # If any changes caused by the merge commit, skip this step because versions should already pumped with that merge.
         # But that should be avoided because our own extensions may not be bumped.
       - name: Bump extensions that uses a modified lib
-        if: steps.modified-libs.outputs.any_changed == 'true' && !startsWith(github.event.head_commit.message, '[skip mass-bump]')
+        if: steps.modified-libs.outputs.any_changed == 'true'
         run: |
           latest_commit_author=$(git log -1 --pretty=%an)
-          isKmk=false
-          if [[ "$latest_commit_author" == *"Cuong"* || "$latest_commit_author" == *"cuong"* ]]; then
-            isKmk=true
-          fi
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           chmod +x ./.github/scripts/bump-versions.py
-          ./.github/scripts/bump-versions.py $isKmk "${{ steps.set-env.outputs.LATEST_COMMIT_MESSAGE }}" ${{ steps.modified-libs.outputs.all_changed_files }}
+          ./.github/scripts/bump-versions.py "${{ steps.set-env.outputs.LATEST_COMMIT_MESSAGE }}" ${{ steps.modified-libs.outputs.all_changed_files }}
           git push
 
       - name: Set up Java
@@ -82,7 +78,7 @@ jobs:
           distribution: temurin
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@8379f6a1328ee0e06e2bb424dadb7b159856a326 # v4.4.0
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
         with:
           cache-read-only: true
 
@@ -117,7 +113,7 @@ jobs:
           distribution: temurin
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@8379f6a1328ee0e06e2bb424dadb7b159856a326 # v4.4.0
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
         with:
           cache-read-only: ${{ matrix.chunk.number > 1 }}
 
@@ -180,7 +176,7 @@ jobs:
       - name: Checkout repo branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: yuzono/anime-repo
+          repository: yuzono/aniyomi-repo
           token: ${{ secrets.BOT_PAT }}
           ref: repo
           path: repo
@@ -195,8 +191,20 @@ jobs:
         with:
           message: "${{ needs.prepare.outputs.latestCommitMessage }}"
           cwd: "./repo"
-          committer_name: github-actions[bot]
-          committer_email: github-actions[bot]@users.noreply.github.com
+          # committer_name: github-actions[bot]
+          # committer_email: github-actions[bot]@users.noreply.github.com
+
+      - name: Sync repo
+        run: |
+          cd repo
+          git config user.name "Yūzōnō"
+          git config user.email "support+yuzono@noreply.github.com"
+          git remote set-url origin https://github.com/yuzono/anime-repo.git
+          git fetch origin
+          git reset origin/repo
+          git add -A
+          git commit --amend -m "${{ needs.prepare.outputs.latestCommitMessage }}" --no-sign --allow-empty || echo "No changes to commit"
+          git push origin HEAD:repo --force
 
       - name: Purge cached index on jsDelivr
         run: |
