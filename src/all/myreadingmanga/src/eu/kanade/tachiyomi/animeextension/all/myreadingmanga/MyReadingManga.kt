@@ -204,7 +204,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val date = parseDate(document.select(".entry-time").text())
         val animeUrl = document.baseUri()
         // create first episode since its on main anime page
-        episodes.add(createEpisode("1", document.baseUri(), date, "Part 1"))
+        episodes.add(createEpisode("1", document.baseUri(), date, "Episode 1"))
         // see if there are multiple episodes or not
         val lastEpisodeNumber = document.select(episodeListSelector()).last()?.text()
         if (lastEpisodeNumber != null) {
@@ -212,7 +212,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             // so we take the last one and loop it to get all hidden ones.
             // Example: 1 2 3 4 .. 7 8 9 Next
             for (i in 2..lastEpisodeNumber.toInt()) {
-                episodes.add(createEpisode(i.toString(), document.baseUri(), date, "Part $i"))
+                episodes.add(createEpisode(i.toString(), document.baseUri(), date, "Episode $i"))
             }
         }
         episodes.reverse()
