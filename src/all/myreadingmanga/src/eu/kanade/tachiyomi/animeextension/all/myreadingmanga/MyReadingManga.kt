@@ -242,7 +242,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         // Assuming the direct MP4 link is the highest quality available.
         // You might want to parse quality if it's indicated in the filename or page.
         val quality = "Default" // You can try to extract quality from the URL if needed, e.g., videoUrl.substringAfterLast("/").substringBefore(".mp4")
-        return listOf(Video(videoUrl, quality, videoUrl))
+        return listOf(Video(videoUrl, quality, videoUrl, headers))
     }
 
     override fun videoListSelector(): String {
