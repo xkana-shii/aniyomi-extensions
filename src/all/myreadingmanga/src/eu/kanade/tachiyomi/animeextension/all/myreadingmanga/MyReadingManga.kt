@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservableSuccess
+import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Headers
 import okhttp3.Request
@@ -145,14 +146,15 @@ abstract class MyReadingManga(override val lang: String, private val siteLang: S
     private fun cleanAuthor(author: String) = author.substringAfter("[").substringBefore("]").trim()
 
     // Anime Details
-    override fun fetchAnimeDetails(anime: SAnime): Observable<SAnime> {
-        val needCover = anime.thumbnail_url?.let { !client.newCall(GET(it, headers)).execute().isSuccessful } ?: true
+    override suspend fun getAnimeDetails(anime: SAnime): SAnime {
+        val needCover = anime.thumbnail_url?.let {
+            runCatching {
+                !client.newCall(GET(it, headers)).awaitSuccess().isSuccessful
+            }.getOrDefault(true)
+        } ?: true
 
-        return client.newCall(animeDetailsRequest(anime))
-            .asObservableSuccess()
-            .map { response ->
-                animeDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
-            }
+        val response = client.newCall(animeDetailsRequest(anime)).awaitSuccess()
+        return animeDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
     }
 
     private fun animeDetailsParse(document: Document, needCover: Boolean = true): SAnime {
