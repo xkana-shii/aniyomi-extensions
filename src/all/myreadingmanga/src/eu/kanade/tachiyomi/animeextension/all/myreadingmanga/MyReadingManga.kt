@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Headers
@@ -46,41 +47,83 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override val supportsLatest = true
 
-    // Popular - Random
+    // --- Selectors common to Popular, Latest, and Search (for video entries) ---
+    // We'll primarily target articles categorized as "video"
+    private val VIDEO_ARTICLE_SELECTOR = "article.category-video"
+
+    private fun buildAnimeFromVideoElement(element: Element): SAnime {
+        val anime = SAnime.create().apply {
+            setUrlWithoutDomain(element.select("a.entry-title-link").first()?.attr("href") ?: throw Exception("URL not found"))
+            title = cleanTitle(element.select("h2.entry-title").text())
+        }
+        val thumbnailElement = element.select("img.entry-image").first()
+        if (thumbnailElement != null) anime.thumbnail_url = getThumbnail(getImage(thumbnailElement))
+        return anime
+    }
+
+    // ============================== Popular ===============================
     override fun popularAnimeRequest(page: Int): Request {
-        return GET("$baseUrl/search/?wpsolr_sort=sort_by_random&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang", headers) // Random Manga as returned by search
+        // Direct to the video category for popular
+        return GET("$baseUrl/video/" + if (page > 1) "page/$page/" else "", headers)
     }
 
     override fun popularAnimeParse(response: Response): AnimesPage {
-        cacheAssistant()
-        return searchAnimeParse(response)
+        cacheAssistant() // Still useful for filters
+        val document = response.asJsoup()
+        val animes = document.select(VIDEO_ARTICLE_SELECTOR)
+            .map { buildAnimeFromVideoElement(it) }
+        val hasNextPage = document.select("li.pagination-next").first() != null
+        return AnimesPage(animes, hasNextPage)
     }
-    override fun popularAnimeNextPageSelector() = throw UnsupportedOperationException()
-    override fun popularAnimeSelector() = throw UnsupportedOperationException()
-    override fun popularAnimeFromElement(element: Element) = throw UnsupportedOperationException()
+    override fun popularAnimeNextPageSelector() = "li.pagination-next"
+    override fun popularAnimeSelector() = VIDEO_ARTICLE_SELECTOR
+    override fun popularAnimeFromElement(element: Element) = buildAnimeFromVideoElement(element)
 
-    // Latest
-    @SuppressLint("DefaultLocale")
+    // =============================== Latest ===============================
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/lang/${latestLang.lowercase()}" + if (page > 1) "/page/$page/" else "", headers) // Home Page - Latest Manga
+        // Direct to the video category for latest
+        return GET("$baseUrl/video/" + if (page > 1) "page/$page/" else "", headers)
     }
 
-    override fun latestUpdatesNextPageSelector() = "li.pagination-next"
-    override fun latestUpdatesSelector() = "article"
-    override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
     override fun latestUpdatesParse(response: Response): AnimesPage {
         cacheAssistant()
-        return super.latestUpdatesParse(response)
+        val document = response.asJsoup()
+        val animes = document.select(VIDEO_ARTICLE_SELECTOR)
+            .map { buildAnimeFromVideoElement(it) }
+        val hasNextPage = document.select("li.pagination-next").first() != null
+        return AnimesPage(animes, hasNextPage)
+    }
+    override fun latestUpdatesNextPageSelector() = "li.pagination-next"
+    override fun latestUpdatesSelector() = VIDEO_ARTICLE_SELECTOR
+    override fun latestUpdatesFromElement(element: Element) = buildAnimeFromVideoElement(element)
+
+    // =============================== Search ===============================
+    override suspend fun getSearchAnime(page: Int, query: String, filters: AnimeFilterList): AnimesPage {
+        return if (query.startsWith(PREFIX_SEARCH)) { // URL intent handler
+            val id = query.removePrefix(PREFIX_SEARCH)
+            client.newCall(GET("$baseUrl/$id"))
+                .awaitSuccess()
+                .use(::searchAnimeByIdParse)
+        } else {
+            super.getSearchAnime(page, query, filters)
+        }
     }
 
-    // Search
+    private fun searchAnimeByIdParse(response: Response): AnimesPage {
+        val details = animeDetailsParse(response.asJsoup()).apply {
+            setUrlWithoutDomain(response.request.url.toString())
+            initialized = true
+        }
+        return AnimesPage(listOf(details), false)
+    }
+
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val filterList = if (filters.isEmpty()) getFilterList() else filters
-        // whether enforce language is true will change the index of the loop below
         val indexModifier = filterList.filterIsInstance<EnforceLanguageFilter>().first().indexModifier()
 
         val uri = Uri.parse("$baseUrl/search/").buildUpon()
             .appendQueryParameter("wpsolr_q", query)
+
         filterList.forEachIndexed { i, filter ->
             if (filter is UriFilter) {
                 filter.addToUri(uri, "wpsolr_fq[${i - indexModifier}]")
@@ -89,44 +132,43 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 uri.appendQueryParameter("wpsolr_sort", listOf("sort_by_date_desc", "sort_by_date_asc", "sort_by_random", "sort_by_relevancy_desc")[filter.state])
             }
         }
+        // Force search results to include 'video' category
+        uri.appendQueryParameter("wpsolr_fq[${filterList.size - indexModifier}]", "category:video")
         uri.appendQueryParameter("wpsolr_page", page.toString())
 
         return GET(uri.toString(), headers)
     }
 
-    override fun searchAnimeNextPageSelector(): String? = throw UnsupportedOperationException()
-    override fun searchAnimeSelector() = "div.results-by-facets div[id*=res]"
+    override fun searchAnimeNextPageSelector(): String? = throw UnsupportedOperationException() // Pagination for search is often tricky with custom filters
+    override fun searchAnimeSelector() = "div.results-by-facets div[id*=res].category-video" // Filter search results
     private var animeParsedSoFar = 0
     override fun searchAnimeParse(response: Response): AnimesPage {
         val document = response.asJsoup()
         if (document.location().contains("page=1")) animeParsedSoFar = 0
-        val animes = document.select(searchAnimeSelector()).map { searchAnimeFromElement(it) }
-            .also { animeParsedSoFar += it.count() }
+        val animes = document.select(searchAnimeSelector()).map { element ->
+            // Re-use buildAnimeFromVideoElement for consistency, ensure it works with search result elements
+            SAnime.create().apply {
+                setUrlWithoutDomain(element.select("a").first()?.attr("href") ?: throw Exception("URL not found"))
+                title = cleanTitle(element.select("a").first()?.text() ?: "")
+                thumbnail_url = getThumbnail(getImage(element.select("img").firstOrNull()))
+            }
+        }.also { animeParsedSoFar += it.count() }
         val totalResults = Regex("""(\d+)""").find(document.select("div.res_info").text())?.groupValues?.get(1)?.toIntOrNull() ?: 0
         return AnimesPage(animes, animeParsedSoFar < totalResults)
     }
-    override fun searchAnimeFromElement(element: Element) = buildAnime(element.select("a").first()!!, element.select("img").first())
+    override fun searchAnimeFromElement(element: Element) = throw UnsupportedOperationException() // Use custom logic in searchAnimeParse
 
-    // Build Anime From Element
-    private fun buildAnime(titleElement: Element, thumbnailElement: Element?): SAnime {
-        val anime = SAnime.create().apply {
-            setUrlWithoutDomain(titleElement.attr("href"))
-            title = cleanTitle(titleElement.text())
-        }
-        if (thumbnailElement != null) anime.thumbnail_url = getThumbnail(getImage(thumbnailElement))
-        return anime
-    }
-
+    // Build Anime From Element (consolidated for internal use)
     private val extensionRegex = Regex("""\.(jpg|png|jpeg|webp)""")
 
-    private fun getImage(element: Element): String? {
+    private fun getImage(element: Element?): String? {
+        element ?: return null
         val url = when {
             element.attr("data-src").contains(extensionRegex) -> element.attr("abs:data-src")
             element.attr("data-cfsrc").contains(extensionRegex) -> element.attr("abs:data-cfsrc")
             element.attr("src").contains(extensionRegex) -> element.attr("abs:src")
             else -> element.attr("abs:data-lazy-src")
         }
-
         return if (URLUtil.isValidUrl(url)) url else null
     }
 
@@ -143,11 +185,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     private fun cleanAuthor(author: String) = author.substringAfter("[").substringBefore("]").trim()
 
-    // Anime Details
+    // =========================== Anime Details ============================
     override fun fetchAnimeDetails(anime: SAnime): Observable<SAnime> {
         val needCover = anime.thumbnail_url?.let { !client.newCall(GET(it, headers)).execute().isSuccessful } ?: true
 
-        return client.newCall(GET(anime.url, headers)) // Use anime.url for details request
+        return client.newCall(GET(anime.url, headers))
             .asObservableSuccess()
             .map { response ->
                 animeDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
@@ -161,7 +203,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             artist = author
             genre = document.select(".entry-header p a[href*=genre], [href*=tag], span.entry-categories a").joinToString { it.text() }
             val basicDescription = document.select("h1").text()
-            // too troublesome to achieve 100% accuracy assigning scanlator group during episodeListParse
             val scanlatedBy = document.select(".entry-terms:has(a[href*=group])").firstOrNull()
                 ?.select("a[href*=group]")?.joinToString(prefix = "Scanlated by: ") { it.text() }
             val extendedDescription = document.select(".entry-content p:not(p:containsOwn(|)):not(.chapter-class + p)").joinToString("\n") { it.text() }
@@ -185,29 +226,31 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override fun animeDetailsParse(document: Document) = throw UnsupportedOperationException()
 
-    // Start Episode Get
-    override fun episodeListSelector() = "a[class=page-numbers]"
+    // ============================== Episodes ==============================
+    // For animated content, usually there's one "episode" per entry unless multi-part
+    override fun episodeListSelector() = "irrelevant" // We will create episode manually
 
     @SuppressLint("DefaultLocale")
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.asJsoup()
         val episodes = mutableListOf<SEpisode>()
 
-        val date = parseDate(document.select(".entry-time").text())
-        val animeUrl = document.baseUri()
-        // create first episode since its on main anime page
-        episodes.add(createEpisode("1", document.baseUri(), date, "Part 1"))
-        // see if there are multiple episodes or not
-        val lastEpisodeNumber = document.select(episodeListSelector()).last()?.text()
-        if (lastEpisodeNumber != null) {
-            // There are entries with more episodes but those never show up,
-            // so we take the last one and loop it to get all hidden ones.
-            // Example: 1 2 3 4 .. 7 8 9 Next
-            for (i in 2..lastEpisodeNumber.toInt()) {
-                episodes.add(createEpisode(i.toString(), document.baseUri(), date, "Part $i"))
+        // Check if it's actually a video page by looking for the "Video" category
+        val isVideoContent = document.select("article.category-video").first() != null ||
+            document.select("h1").text().contains("Animation:", ignoreCase = true)
+
+        if (isVideoContent) {
+            val date = parseDate(document.select(".entry-time").text())
+            val animeUrl = document.baseUri()
+
+            val episode = SEpisode.create().apply {
+                url = animeUrl
+                name = document.select("h1").text() // Use the title as the episode name
+                date_upload = date
+                episode_number = 1F // Assume single episode for now
             }
+            episodes.add(episode)
         }
-        episodes.reverse()
         return episodes
     }
 
@@ -215,29 +258,39 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return SimpleDateFormat("MMM dd, yyyy", Locale.US).parse(date)?.time ?: 0
     }
 
-    private fun createEpisode(pageNumber: String, animeUrl: String, date: Long, chname: String): SEpisode {
-        val episode = SEpisode.create()
-        episode.setUrlWithoutDomain("$animeUrl/$pageNumber")
-        episode.name = chname
-        episode.date_upload = date
-        episode.episode_number = pageNumber.toFloatOrNull() ?: 1F // Assign an episode number
-        return episode
-    }
-
     override fun episodeFromElement(element: Element) = throw UnsupportedOperationException()
 
-    // Videos (formerly Pages)
-    // Note: Since MyReadingManga provides images, not videos, this method will return an empty list.
-    // Aniyomi's player expects actual video URLs.
+    // ============================ Video Links =============================
     override fun videoListParse(document: Document): List<Video> {
-        // If MyReadingManga were to host videos, the logic would go here.
-        // For image-based content, this method will return an empty list.
-        // You might consider how Aniyomi handles image sequences if that's the goal.
-        return emptyList()
+        val videos = mutableListOf<Video>()
+
+        // Look for video elements
+        val videoElements = document.select("div.entry-content video source, div.entry-content iframe")
+
+        videoElements.forEach { element ->
+            val videoUrl = if (element.tagName() == "source") {
+                element.attr("src")
+            } else { // iframe
+                element.attr("src")
+            }
+
+            if (URLUtil.isValidUrl(videoUrl)) {
+                // Try to infer quality or use a generic name
+                val quality = if (videoUrl.contains("1080p")) "1080p"
+                else if (videoUrl.contains("720p")) "720p"
+                else if (videoUrl.contains("480p")) "480p"
+                else if (videoUrl.contains("360p")) "360p"
+                else "Default"
+
+                videos.add(Video(videoUrl, quality, videoUrl, headers = headers)) // Pass headers for potential referer issues
+            }
+        }
+        return videos.distinctBy { it.videoUrl } // Avoid duplicate video URLs
     }
 
     override fun videoUrlParse(document: Document) = throw UnsupportedOperationException()
 
+    // ============================== Settings ==============================
     // Filter Parsing, grabs pages as document and filters out Genres, Popular Tags, and Categories, Parings, and Scan Groups
     private var filtersCached = false
     private val filterMap = mutableMapOf<String, String>()
@@ -282,8 +335,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return AnimeFilterList(
             EnforceLanguageFilter(siteLang),
             SearchSortTypeList(),
+            // Only add categories relevant to video content if possible, or leave as is if general
             GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]")),
             TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tagcloud a[href*=/tag/]")),
+            // We need to ensure that the "Video" category is always implicitly applied for search.
+            // A direct category filter might conflict if not handled carefully, so keeping it generic
+            // for search and adding "category:video" in searchAnimeRequest is safer.
             CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".links a")),
             PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".links a")),
             ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".links a")),
@@ -304,11 +361,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class ScanGroupFilter(GROUP: Array<String>) : UriSelectFilter("Scanlation Group", "group_str", arrayOf("Any", *GROUP))
     private class SearchSortTypeList : AnimeFilter.Select<String>("Sort by", arrayOf("Newest", "Oldest", "Random", "More relevant"))
 
-    /**
-     * Class that creates a select filter. Each entry in the dropdown has a name and a display name.
-     * If an entry is selected it is appended as a query parameter onto the end of the URI.
-     * If `firstIsUnspecified` is set to true, if the first entry is selected, nothing will be appended on the the URI.
-     */
     private open class UriSelectFilter(
         displayName: String,
         val uriValuePrefix: String,
@@ -333,14 +385,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
-    /**
-     * Represents a filter that is able to modify a URI.
-     */
     private interface UriFilter {
         fun addToUri(uri: Uri.Builder, uriParam: String)
     }
 
     companion object {
+        const val PREFIX_SEARCH = "id:" // Keep for direct ID search
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"
     }
 
