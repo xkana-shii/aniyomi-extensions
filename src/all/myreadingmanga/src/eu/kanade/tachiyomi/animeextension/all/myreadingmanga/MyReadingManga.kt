@@ -22,7 +22,7 @@ import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-abstract class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource() {
+open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource() {
 
     // Basic Info
     override val name = "MyReadingManga"
@@ -96,6 +96,10 @@ abstract class MyReadingManga(override val lang: String, private val siteLang: S
 
     override fun searchAnimeNextPageSelector(): String? = throw UnsupportedOperationException()
     override fun searchAnimeSelector() = "div.results-by-facets div[id*=res]"
+    override fun videoFromElement(element: Element): Video {
+        TODO("Not yet implemented")
+    }
+
     private var animeParsedSoFar = 0
     override fun searchAnimeParse(response: Response): AnimesPage {
         val document = response.asJsoup()
@@ -185,6 +189,9 @@ abstract class MyReadingManga(override val lang: String, private val siteLang: S
     }
 
     override fun animeDetailsParse(document: Document) = throw UnsupportedOperationException()
+    override fun episodeFromElement(element: Element): SEpisode {
+        TODO("Not yet implemented")
+    }
 
     // Start Episode Get
     override fun episodeListSelector() = "a[class=page-numbers]"
@@ -236,6 +243,14 @@ abstract class MyReadingManga(override val lang: String, private val siteLang: S
         // You might want to parse quality if it's indicated in the filename or page.
         val quality = "Default" // You can try to extract quality from the URL if needed, e.g., videoUrl.substringAfterLast("/").substringBefore(".mp4")
         return listOf(Video(videoUrl, quality, videoUrl))
+    }
+
+    override fun videoListSelector(): String {
+        TODO("Not yet implemented")
+    }
+
+    override fun videoUrlParse(document: Document): String {
+        TODO("Not yet implemented")
     }
 
     // Filter Parsing, grabs pages as document and filters out Genres, Popular Tags, and Categories, Parings, and Scan Groups
