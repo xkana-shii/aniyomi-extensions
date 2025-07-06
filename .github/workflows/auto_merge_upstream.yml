@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   update-kohi-den:
-    if: github.repository == 'kana-shii/aniyomi-extensions'
+    if: github.repository == 'xkana-shii/aniyomi-extensions'
     name: Update Kohi-den
     runs-on: ubuntu-latest
 
