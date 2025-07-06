@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload APKs (${{ matrix.chunk.number }})
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: github.repository == 'kana-shii/aniyomi-extensions'
+        if: github.repository == 'xkana-shii/aniyomi-extensions'
         with:
           name: "individual-apks-${{ matrix.chunk.number }}"
           path: "**/*.apk"
@@ -148,7 +148,7 @@ jobs:
   publish:
     name: Publish extension repo
     needs: [prepare, build]
-    if: github.repository == 'kana-shii/aniyomi-extensions'
+    if: github.repository == 'xkana-shii/aniyomi-extensions'
     runs-on: 'ubuntu-24.04'
     steps:
       - name: Download APK artifacts
@@ -180,7 +180,7 @@ jobs:
       - name: Checkout repo branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: kana-shii/anime-repo
+          repository: xkana-shii/anime-repo
           token: ${{ secrets.BOT_PAT }}
           ref: repo
           path: repo
@@ -200,4 +200,4 @@ jobs:
 
       - name: Purge cached index on jsDelivr
         run: |
-          curl https://purge.jsdelivr.net/gh/kana-shii/anime-repo@repo/index.min.json
+          curl https://purge.jsdelivr.net/gh/xkana-shii/anime-repo@repo/index.min.json
