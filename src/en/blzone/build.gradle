@@ -1,8 +1,8 @@
 ext {
-    extKmkVersionCode = 1
+    extKmkVersionCode = 2
     extName = 'BLZone'
     extClass = '.BLZone'
-    extVersionCode = 1
+    extVersionCode = 2
     isNsfw = true
 }
 
