@@ -46,9 +46,9 @@ abstract class MyReadingManga(override val lang: String, private val siteLang: S
 
     override val supportsLatest = true
 
-    // Popular - Random
+    // Popular - Relevancy
     override fun popularAnimeRequest(page: Int): Request {
-        return GET("$baseUrl/search/?wpsolr_sort=sort_by_random&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers) // Random Anime as returned by search
+        return GET("$baseUrl/search/?wpsolr_sort=sort_by_relevancy_desc&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers)
     }
 
     override fun popularAnimeParse(response: Response): AnimesPage {
@@ -59,19 +59,20 @@ abstract class MyReadingManga(override val lang: String, private val siteLang: S
     override fun popularAnimeSelector() = throw UnsupportedOperationException()
     override fun popularAnimeFromElement(element: Element) = throw UnsupportedOperationException()
 
-    // Latest
+    // Latest - Date Uploaded
     @SuppressLint("DefaultLocale")
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/search/?wpsolr_sort=sort_by_date_desc&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers) // Search - Latest Anime
+        return GET("$baseUrl/search/?wpsolr_sort=sort_by_date_desc&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers)
     }
 
-    override fun latestUpdatesNextPageSelector() = "li.pagination-next"
-    override fun latestUpdatesSelector() = "article"
-    override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
     override fun latestUpdatesParse(response: Response): AnimesPage {
         cacheAssistant()
-        return super.latestUpdatesParse(response)
+        return searchAnimeParse(response)
     }
+
+    override fun latestUpdatesNextPageSelector() = throw UnsupportedOperationException()
+    override fun latestUpdatesSelector() = throw UnsupportedOperationException()
+    override fun latestUpdatesFromElement(element: Element) = throw UnsupportedOperationException()    
 
     // Search
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
