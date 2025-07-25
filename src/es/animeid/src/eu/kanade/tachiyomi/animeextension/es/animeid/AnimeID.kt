@@ -1,7 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.es.animeid
 
-import android.app.Application
-import android.content.SharedPreferences
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
@@ -16,6 +14,7 @@ import eu.kanade.tachiyomi.lib.streamwishextractor.StreamWishExtractor
 import eu.kanade.tachiyomi.lib.universalextractor.UniversalExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -25,8 +24,6 @@ import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,9 +40,7 @@ class AnimeID : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     private val json: Json by injectLazy()
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences by getPreferencesLazy()
 
     override fun popularAnimeSelector(): String = "#result article.item"
 
@@ -88,10 +83,10 @@ class AnimeID : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             val listCaps = jObject["list"]!!.jsonArray
             listCaps!!.forEach { cap ->
                 val capParsed = cap.jsonObject
-                val epNum = capParsed["numero"]!!.jsonPrimitive.content!!.toFloat()
+                val epNum = capParsed["numero"]!!.jsonPrimitive.content
                 val episode = SEpisode.create()
                 val dateUpload = manualDateParse(capParsed["date"]!!.jsonPrimitive.content!!.toString())
-                episode.episode_number = epNum
+                episode.episode_number = epNum.toFloat()
                 episode.name = "Episodio $epNum"
                 dateUpload!!.also { episode.date_upload = it }
                 episode.setUrlWithoutDomain(baseUrl + capParsed["href"]!!.jsonPrimitive.content!!.toString())
@@ -128,16 +123,26 @@ class AnimeID : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val videoList = mutableListOf<Video>()
         document.select("#partes div.container li.subtab div.parte").forEach { script ->
             val jsonString = script.attr("data")
-            val jsonUnescape = unescapeJava(jsonString)!!.replace("\\", "")
+            val titleServer = script.closest(".subtab")?.attr("data-tab-id")?.let {
+                document.selectFirst("#mirrors [data-tab-id=\"$it\"]")?.ownText()?.trim()
+            } ?: ""
+            val jsonUnescape = unescapeJava(jsonString).replace("\\", "")
             val url = fetchUrls(jsonUnescape).firstOrNull()?.replace("\\\\", "\\") ?: ""
-            return when {
-                url.contains("streamtape") || url.contains("tape") || url.contains("stp") -> streamtapeExtractor.videosFromUrl(url)
-                url.contains("wish") || url.contains("fviplions") || url.contains("obeywish") -> streamwishExtractor.videosFromUrl(url, videoNameGen = { "StreamWish:$it" })
+            val matched = conventions.firstOrNull { (_, names) -> names.any { it.lowercase() in url.lowercase() || it.lowercase() in titleServer.lowercase() } }?.first
+            val videos = when (matched) {
+                "streamtape" -> streamtapeExtractor.videosFromUrl(url)
+                "streamwish" -> streamwishExtractor.videosFromUrl(url, videoNameGen = { "StreamWish:$it" })
                 else -> universalExtractor.videosFromUrl(url, headers)
             }
+            videoList.addAll(videos)
         }
         return videoList
     }
+
+    private val conventions = listOf(
+        "streamwish" to listOf("wishembed", "streamwish", "strwish", "wish", "Kswplayer", "Swhoi", "Multimovies", "Uqloads", "neko-stream", "swdyu", "fviplions", "streamgg"),
+        "streamtape" to listOf("streamtape", "stp", "stape", "shavetape", "shg"),
+    )
 
     private fun unescapeJava(escaped: String): String {
         var escaped = escaped

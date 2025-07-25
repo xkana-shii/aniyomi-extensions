@@ -1,7 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.all.javgg
 
-import android.app.Application
-import android.content.SharedPreferences
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
@@ -19,11 +17,10 @@ import eu.kanade.tachiyomi.lib.youruploadextractor.YourUploadExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.util.asJsoup
 import eu.kanade.tachiyomi.util.parallelCatchingFlatMapBlocking
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 class Javgg : ConfigurableAnimeSource, AnimeHttpSource() {
 
@@ -35,9 +32,9 @@ class Javgg : ConfigurableAnimeSource, AnimeHttpSource() {
 
     override val supportsLatest = true
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    override val supportsRelatedAnimes = false
+
+    private val preferences by getPreferencesLazy()
 
     companion object {
         private const val PREF_QUALITY_KEY = "preferred_quality"
@@ -46,6 +43,17 @@ class Javgg : ConfigurableAnimeSource, AnimeHttpSource() {
 
         private const val PREF_SERVER_KEY = "preferred_server"
         private const val PREF_SERVER_DEFAULT = "StreamWish"
+
+        /**
+         * Current servers available on the site:
+         * TB: TurboPlay
+         * VH: VidHide
+         * MD: MixDrop
+         * SW: StreamWish
+         * VG: JavGuard
+         * VO: Voe
+         * upjav: upjav
+         */
         private val SERVER_LIST = arrayOf(
             "StreamWish",
             "Voe",
@@ -118,6 +126,23 @@ class Javgg : ConfigurableAnimeSource, AnimeHttpSource() {
         return AnimesPage(animeList, nextPage)
     }
 
+    override fun String.stripKeywordForRelatedAnimes(): List<String> {
+        val regexWhitespace = Regex("\\s+")
+        val regexSpecialCharacters =
+            Regex("([-!~#$%^&*+_|/\\\\,?:;'“”‘’\"<>(){}\\[\\]。・～：—！？、―«»《》〘〙【】「」｜]|\\s-|-\\s|\\s\\.|\\.\\s)")
+        val regexNumberOnly = Regex("^\\d+$")
+
+        return replace(regexSpecialCharacters, " ")
+            .split(regexWhitespace)
+            .map {
+                // remove number only
+                it.replace(regexNumberOnly, "")
+                    .lowercase()
+            }
+            // exclude single character
+            .filter { it.length > 1 }
+    }
+
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.asJsoup()
         return if (document.select(".dooplay_player_option").any()) {
@@ -137,7 +162,7 @@ class Javgg : ConfigurableAnimeSource, AnimeHttpSource() {
         val document = response.asJsoup()
         return document.select("[id*=source-player] iframe").parallelCatchingFlatMapBlocking {
             val numOpt = it.closest(".source-box")?.attr("id")?.replace("source-player-", "")
-            val serverName = document.select("[data-nume=\"$numOpt\"] .server").text()
+            val serverName = document.select("[data-nume=\"$numOpt\"] .server").attr("data-text")
             serverVideoResolver(serverName, it.attr("src"))
         }
     }
@@ -173,7 +198,7 @@ class Javgg : ConfigurableAnimeSource, AnimeHttpSource() {
     }
 
     private fun org.jsoup.nodes.Element.getImageUrl(): String? {
-        val imageLinkRegex = """https?://[^\s]+\.(jpg|png)""".toRegex()
+        val imageLinkRegex = """https?://\S+\.(jpg|png)""".toRegex()
 
         for (link in this.select("[href], [src]")) {
             val href = link.attr("href")

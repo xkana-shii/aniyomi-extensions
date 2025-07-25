@@ -1,7 +1,7 @@
 ext {
     extName = 'Serieskao'
     extClass = '.Serieskao'
-    extVersionCode = 9
+    extVersionCode = 11
 }
 
 apply from: "$rootDir/common.gradle"
@@ -25,6 +25,5 @@ dependencies {
     implementation(project(':lib:streamhidevid-extractor'))
     implementation(project(':lib:streamsilk-extractor'))
     implementation(project(':lib:vidguard-extractor'))
-    implementation(project(':lib:universal-extractor'))
     implementation(project(':lib:cryptoaes'))
 }

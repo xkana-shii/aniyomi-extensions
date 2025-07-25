@@ -1,7 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.es.animefenix
 
-import android.app.Application
-import android.content.SharedPreferences
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
@@ -24,17 +22,17 @@ import eu.kanade.tachiyomi.lib.streamwishextractor.StreamWishExtractor
 import eu.kanade.tachiyomi.lib.universalextractor.UniversalExtractor
 import eu.kanade.tachiyomi.lib.upstreamextractor.UpstreamExtractor
 import eu.kanade.tachiyomi.lib.uqloadextractor.UqloadExtractor
+import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
 import eu.kanade.tachiyomi.lib.voeextractor.VoeExtractor
 import eu.kanade.tachiyomi.lib.youruploadextractor.YourUploadExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.util.asJsoup
 import eu.kanade.tachiyomi.util.parallelCatchingFlatMapBlocking
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
 import org.jsoup.select.Elements
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 class Animefenix : ConfigurableAnimeSource, AnimeHttpSource() {
 
@@ -46,9 +44,7 @@ class Animefenix : ConfigurableAnimeSource, AnimeHttpSource() {
 
     override val supportsLatest = false
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
+    private val preferences by getPreferencesLazy()
 
     companion object {
         private const val PREF_QUALITY_KEY = "preferred_quality"
@@ -147,26 +143,30 @@ class Animefenix : ConfigurableAnimeSource, AnimeHttpSource() {
     private val streamTapeExtractor by lazy { StreamTapeExtractor(client) }
     private val streamHideVidExtractor by lazy { StreamHideVidExtractor(client, headers) }
     private val filelionsExtractor by lazy { StreamWishExtractor(client, headers) }
+    private val vidGuardExtractor by lazy { VidGuardExtractor(client) }
     private val amazonExtractor by lazy { AmazonExtractor(client) }
 
     private fun serverVideoResolver(url: String): List<Video> {
         return runCatching {
-            when {
-                arrayOf("voe", "robertordercharacter", "donaldlineelse").any(url) -> voeExtractor.videosFromUrl(url)
-                arrayOf("amazon", "amz").any(url) -> amazonExtractor.videosFromUrl(url)
-                arrayOf("ok.ru", "okru").any(url) -> okruExtractor.videosFromUrl(url)
-                arrayOf("moon").any(url) -> filemoonExtractor.videosFromUrl(url, prefix = "Filemoon:")
-                arrayOf("uqload").any(url) -> uqloadExtractor.videosFromUrl(url)
-                arrayOf("mp4upload").any(url) -> mp4uploadExtractor.videosFromUrl(url, headers)
-                arrayOf("wish").any(url) -> streamwishExtractor.videosFromUrl(url, videoNameGen = { "StreamWish:$it" })
-                arrayOf("doodstream", "dood.").any(url) -> doodExtractor.videosFromUrl(url, "DoodStream")
-                arrayOf("streamlare").any(url) -> streamlareExtractor.videosFromUrl(url)
-                arrayOf("yourupload", "upload").any(url) -> yourUploadExtractor.videoFromUrl(url, headers = headers)
-                arrayOf("burstcloud", "burst").any(url) -> burstcloudExtractor.videoFromUrl(url, headers = headers)
-                arrayOf("upstream").any(url) -> upstreamExtractor.videosFromUrl(url)
-                arrayOf("streamtape", "stp", "stape").any(url) -> streamTapeExtractor.videosFromUrl(url)
-                arrayOf("ahvsh", "streamhide").any(url) -> streamHideVidExtractor.videosFromUrl(url)
-                arrayOf("/stream/fl.php").any(url) -> {
+            val matched = conventions.firstOrNull { (_, names) -> names.any { it.lowercase() in url.lowercase() } }?.first
+            when (matched) {
+                "voe" -> voeExtractor.videosFromUrl(url)
+                "amazon" -> amazonExtractor.videosFromUrl(url)
+                "okru" -> okruExtractor.videosFromUrl(url)
+                "filemoon" -> filemoonExtractor.videosFromUrl(url, prefix = "Filemoon:")
+                "uqload" -> uqloadExtractor.videosFromUrl(url)
+                "mp4upload" -> mp4uploadExtractor.videosFromUrl(url, headers)
+                "streamwish" -> streamwishExtractor.videosFromUrl(url, videoNameGen = { "StreamWish:$it" })
+                "doodstream" -> doodExtractor.videosFromUrl(url, "DoodStream")
+                "streamlare" -> streamlareExtractor.videosFromUrl(url)
+                "yourupload" -> yourUploadExtractor.videoFromUrl(url, headers = headers)
+                "burstcloud" -> burstcloudExtractor.videoFromUrl(url, headers = headers)
+                "upstream" -> upstreamExtractor.videosFromUrl(url)
+                "streamtape" -> streamTapeExtractor.videosFromUrl(url)
+                "vidhide" -> streamHideVidExtractor.videosFromUrl(url)
+                "filelions" -> filelionsExtractor.videosFromUrl(url, videoNameGen = { "FileLions:$it" })
+                "vidguard" -> vidGuardExtractor.videosFromUrl(url)
+                "fireload" -> {
                     val video = url.substringAfter("/stream/fl.php?v=")
                     if (client.newCall(GET(video)).execute().code == 200) {
                         listOf(Video(video, "FireLoad", video))
@@ -174,13 +174,30 @@ class Animefenix : ConfigurableAnimeSource, AnimeHttpSource() {
                         emptyList()
                     }
                 }
-                arrayOf("lion").any(url) -> filelionsExtractor.videosFromUrl(url, videoNameGen = { "FileLions:$it" })
                 else -> universalExtractor.videosFromUrl(url, headers)
             }
         }.getOrElse { emptyList() }
     }
 
-    private fun Array<String>.any(url: String): Boolean = this.any { url.contains(it, ignoreCase = true) }
+    private val conventions = listOf(
+        "voe" to listOf("voe", "tubelessceliolymph", "simpulumlamerop", "urochsunloath", "nathanfromsubject", "yip.", "metagnathtuggers", "donaldlineelse"),
+        "okru" to listOf("ok.ru", "okru"),
+        "filemoon" to listOf("filemoon", "moonplayer", "moviesm4u", "files.im"),
+        "filelions" to listOf("lion"),
+        "amazon" to listOf("amazon", "amz"),
+        "uqload" to listOf("uqload"),
+        "mp4upload" to listOf("mp4upload"),
+        "streamwish" to listOf("wishembed", "streamwish", "strwish", "wish", "Kswplayer", "Swhoi", "Multimovies", "Uqloads", "neko-stream", "swdyu", "iplayerhls", "streamgg"),
+        "doodstream" to listOf("doodstream", "dood.", "ds2play", "doods.", "ds2video", "dooood", "d000d", "d0000d"),
+        "streamlare" to listOf("streamlare", "slmaxed"),
+        "yourupload" to listOf("yourupload", "upload"),
+        "burstcloud" to listOf("burstcloud", "burst"),
+        "upstream" to listOf("upstream"),
+        "streamtape" to listOf("streamtape", "stp", "stape", "shavetape"),
+        "vidhide" to listOf("ahvsh", "streamhide", "guccihide", "streamvid", "vidhide", "kinoger", "smoothpre", "dhtpre", "peytonepre", "earnvids", "ryderjet"),
+        "vidguard" to listOf("vembed", "guard", "listeamed", "bembed", "vgfplay"),
+        "fireload" to listOf("/stream/fl.php"),
+    )
 
     override fun List<Video>.sort(): List<Video> {
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!

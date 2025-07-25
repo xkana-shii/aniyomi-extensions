@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.en.kickassanime
 
-import android.app.Application
 import android.content.SharedPreferences
 import android.util.Base64
 import androidx.preference.ListPreference
@@ -27,6 +26,7 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.parseAs
+import keiyoushi.utils.getPreferencesLazy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -35,8 +35,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.util.Locale
 
@@ -52,9 +50,8 @@ class KickAssAnime : ConfigurableAnimeSource, AnimeHttpSource() {
 
     override val supportsLatest = true
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-            .clearBaseUrl()
+    private val preferences by getPreferencesLazy {
+        clearBaseUrl()
     }
 
     private val json: Json by injectLazy()
@@ -338,9 +335,9 @@ class KickAssAnime : ConfigurableAnimeSource, AnimeHttpSource() {
 
         private const val PREF_DOMAIN_KEY = "preferred_domain"
         private const val PREF_DOMAIN_TITLE = "Preferred domain (requires app restart)"
-        private const val PREF_DOMAIN_DEFAULT = "https://kaa.mx"
-        private val PREF_DOMAIN_ENTRIES = arrayOf("kaa.mx", "kaas.ro", "kaas.to", "kickassanimes.io", "www1.kickassanime.mx")
+        private val PREF_DOMAIN_ENTRIES = arrayOf("kaa.to")
         private val PREF_DOMAIN_ENTRY_VALUES = PREF_DOMAIN_ENTRIES.map { "https://$it" }.toTypedArray()
+        private val PREF_DOMAIN_DEFAULT = PREF_DOMAIN_ENTRY_VALUES[0]
 
         private const val PREF_HOSTER_KEY = "hoster_selection"
         private const val PREF_HOSTER_TITLE = "Enable/Disable Hosts"
