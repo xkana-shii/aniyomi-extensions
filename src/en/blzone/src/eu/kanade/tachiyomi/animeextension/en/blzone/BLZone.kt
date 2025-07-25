@@ -82,14 +82,12 @@ class BLZone : AnimeHttpSource() {
         val animeList = mutableListOf<SAnime>()
         animeList.addAll(document.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
 
-        // Only fetch dorama for first page (to avoid duplicate pagination issues)
         if (response.request.url.encodedPath.endsWith("/anime/")) {
             try {
                 val dramaResponse = client.newCall(GET("$baseUrl/dorama/", headers)).execute()
                 val dramaDoc = dramaResponse.asJsoup()
                 animeList.addAll(dramaDoc.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) })
             } catch (_: Exception) {
-                // Ignore errors on drama
             }
         }
         return AnimesPage(animeList, hasNextPage = hasNextPage(document))
@@ -147,7 +145,6 @@ class BLZone : AnimeHttpSource() {
     // ---- EPISODES ----
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.asJsoup()
-        // Reverse the list so newest episode is first!
         return document.select("#episodes ul.episodios2 > li").map { episodeFromElement(it) }.reversed()
     }
 

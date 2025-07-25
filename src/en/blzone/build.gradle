@@ -1,8 +1,9 @@
 ext {
-    extKmkVersionCode = 2
+    extKmkVersionCode = 1
     extName = 'BLZone'
     extClass = '.BLZone'
-    extVersionCode = 2
+    extVersionCode = 1
+    isNsfw = true
 }
 
 apply from: "$rootDir/common.gradle"
