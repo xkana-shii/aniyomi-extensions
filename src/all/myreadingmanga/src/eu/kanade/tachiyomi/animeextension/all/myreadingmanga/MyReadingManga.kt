@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.animeextension.all.myreadingmanga
 
 import android.annotation.SuppressLint
 import android.net.Uri
-import android.webkit.CookieManager
 import android.webkit.URLUtil
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
@@ -12,6 +11,7 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Headers
@@ -20,10 +20,11 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import rx.Observable
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource() {
+abstract class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource() {
 
     // Basic Info
     override val name = "MyReadingManga"
@@ -45,9 +46,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override val supportsLatest = true
 
-    // Popular - Random
+    // Popular - Relevancy
     override fun popularAnimeRequest(page: Int): Request {
-        return GET("$baseUrl/search/?wpsolr_sort=sort_by_random&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers) // Random Anime as returned by search
+        return GET("$baseUrl/search/?wpsolr_sort=sort_by_relevancy_desc&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers)
     }
 
     override fun popularAnimeParse(response: Response): AnimesPage {
@@ -58,16 +59,20 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun popularAnimeSelector() = throw UnsupportedOperationException()
     override fun popularAnimeFromElement(element: Element) = throw UnsupportedOperationException()
 
-    // Latest
+    // Latest - Date Uploaded
     @SuppressLint("DefaultLocale")
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/search/?wpsolr_sort=sort_by_date_desc&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers) // Search - Latest Anime
+        return GET("$baseUrl/search/?wpsolr_sort=sort_by_date_desc&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang&wpsolr_fq[1]=categories:Video", headers)
+    }
+
+    override fun latestUpdatesParse(response: Response): AnimesPage {
+        cacheAssistant()
+        return searchAnimeParse(response)
     }
 
     override fun latestUpdatesNextPageSelector() = throw UnsupportedOperationException()
     override fun latestUpdatesSelector() = throw UnsupportedOperationException()
-    override fun latestUpdatesFromElement(element: Element): SAnime = throw UnsupportedOperationException()
-    override fun latestUpdatesParse(response: Response): AnimesPage = throw UnsupportedOperationException()
+    override fun latestUpdatesFromElement(element: Element) = throw UnsupportedOperationException()    
 
     // Search
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
@@ -94,10 +99,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override fun searchAnimeNextPageSelector(): String? = throw UnsupportedOperationException()
     override fun searchAnimeSelector() = "div.results-by-facets div[id*=res]"
-    override fun videoFromElement(element: Element): Video {
-        TODO("Not yet implemented")
-    }
-
     private var animeParsedSoFar = 0
     override fun searchAnimeParse(response: Response): AnimesPage {
         val document = response.asJsoup()
@@ -187,9 +188,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun animeDetailsParse(document: Document) = throw UnsupportedOperationException()
-    override fun episodeFromElement(element: Element): SEpisode {
-        TODO("Not yet implemented")
-    }
 
     // Start Episode Get
     override fun episodeListSelector() = "a[class=page-numbers]"
@@ -202,7 +200,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val date = parseDate(document.select(".entry-time").text())
         val animeUrl = document.baseUri()
         // create first episode since its on main anime page
-        episodes.add(createEpisode("1", document.baseUri(), date, "Episode 1"))
+        episodes.add(createEpisode("1", document.baseUri(), date, "Part 1"))
         // see if there are multiple episodes or not
         val lastEpisodeNumber = document.select(episodeListSelector()).last()?.text()
         if (lastEpisodeNumber != null) {
@@ -210,7 +208,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             // so we take the last one and loop it to get all hidden ones.
             // Example: 1 2 3 4 .. 7 8 9 Next
             for (i in 2..lastEpisodeNumber.toInt()) {
-                episodes.add(createEpisode(i.toString(), document.baseUri(), date, "Episode $i"))
+                episodes.add(createEpisode(i.toString(), document.baseUri(), date, "Part $i"))
             }
         }
         episodes.reverse()
@@ -229,45 +227,18 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return episode
     }
 
-    override fun videoListSelector(): String = "div.video-container-ads video source"
-
-    override fun videoUrlParse(document: Document): String {
-        return document.selectFirst(videoListSelector())?.attr("src")
-            ?: throw Exception("No video URL found")
-    }
-
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
-        val videoUrl = videoUrlParse(document)
-        if (videoUrl.isEmpty()) return emptyList()
+        val videoUrl = document.selectFirst("div.video-container-ads video source")?.attr("src")
 
-        val refererUrl = response.request.url.toString()
-        val cookieManager = CookieManager.getInstance()
-        val cookies = cookieManager.getCookie(videoUrl) ?: ""
+        if (videoUrl.isNullOrEmpty()) {
+            return emptyList()
+        }
 
-        val customHeaders = Headers.Builder().apply {
-            set("Referer", refererUrl)
-            set("Cookie", cookies)
-            set("User-Agent", USER_AGENT)
-            set("Range", "bytes=0-")
-            set("Accept", "*/*")
-            set("Accept-Encoding", "identity;q=1, *;q=0")
-            set("Accept-Language", "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6")
-            // set("sec-ch-ua", "Chromium;v=\"134\", Not:A-Brand;v=\"24\", Opera GX;v=\"119\"")
-            // set("sec-ch-ua-arch", "x86")
-            // set("sec-ch-ua-bitness", "64")
-            // set("sec-ch-ua-full-version", "119.0.5497.163")
-            // set("sec-ch-ua-full-version-list", "Chromium;v=\"134.0.6998.205\", Not:A-Brand;v=\"24.0.0.0\", Opera GX;v=\"119.0.5497.163\"")
-            // set("sec-ch-ua-mobile", "?0")
-            // set("sec-ch-ua-model", "")
-            // set("sec-ch-ua-platform", "Windows")
-            // set("sec-ch-ua-platform-version", "19.0.0")
-            // set("sec-fetch-dest", "video")
-            // set("sec-fetch-mode", "no-cors")
-            // set("sec-fetch-site", "same-origin")
-        }.build()
-
-        return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
+        // Assuming the direct MP4 link is the highest quality available.
+        // You might want to parse quality if it's indicated in the filename or page.
+        val quality = "Default" // You can try to extract quality from the URL if needed, e.g., videoUrl.substringAfterLast("/").substringBefore(".mp4")
+        return listOf(Video(videoUrl, quality, videoUrl))
     }
 
     // Filter Parsing, grabs pages as document and filters out Genres, Popular Tags, and Categories, Parings, and Scan Groups
@@ -289,7 +260,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Parses cached page for filters
     private fun returnFilter(url: String, css: String): Array<String> {
-        val document = if (filterMap.isEmpty()) {
+        val document = if (filterMap.isNullOrEmpty()) {
             filtersCached = false
             null
         } else {
