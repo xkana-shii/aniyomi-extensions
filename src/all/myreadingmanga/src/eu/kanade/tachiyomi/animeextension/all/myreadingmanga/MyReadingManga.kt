@@ -71,7 +71,7 @@ abstract class MyReadingManga(override val lang: String, private val siteLang: S
     override fun latestUpdatesNextPageSelector() = throw UnsupportedOperationException()
     override fun latestUpdatesSelector() = throw UnsupportedOperationException()
     override fun latestUpdatesFromElement(element: Element) = throw UnsupportedOperationException()
-    
+
     // Search
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val filterList = if (filters.isEmpty()) getFilterList() else filters
