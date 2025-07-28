@@ -192,7 +192,8 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
         val videos = mutableListOf<Video>()
         serverBoxes.forEachIndexed { index, box ->
             val serverName = serverNames.getOrElse(index) { "server${index + 1}" }
-            if (!SERVER_LIST.any { it.equals(serverName, ignoreCase = true) }) {
+            val serversNames = SERVER_LIST.firstOrNull { it.equals(serverName, ignoreCase = true) }
+            if (serversNames == null) {
                 return@forEachIndexed
             }
 
@@ -204,7 +205,7 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
             } else {
                 src
             }
-            videos += Video(videoUrl, serverName, videoUrl)
+            videos += Video(videoUrl, serversNames, videoUrl)
         }
         return videos.sort()
     }
@@ -215,9 +216,9 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
         val videos = videoListParse(response)
 
         val extractedVideos = mutableListOf<Video>()
-        for (video in videos) { // video.quality here is the server name from videoListParse
+        for (video in videos) {
             val currentExtracted = try {
-                serverVideoResolver(video.quality, video.url)
+                serverVideoResolver(video.url)
             } catch (e: Exception) {
                 emptyList<Video>()
             }
@@ -226,7 +227,7 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
         return extractedVideos
     }
 
-    private fun serverVideoResolver(serverName: String, url: String): List<Video> {
+    private fun serverVideoResolver(url: String): List<Video> {
         return when {
             url.contains("filemoon") -> filemoonExtractor.videosFromUrl(url, "Filemoon")
             url.contains("streamtape") -> streamtapeExtractor.videosFromUrl(url, "StreamTape")
@@ -235,7 +236,6 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
             else -> emptyList()
         }
     }
-
 
     override fun List<Video>.sort(): List<Video> {
         val preferredServer = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
