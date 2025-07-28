@@ -17,7 +17,7 @@ import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.util.asJsoup
-import keiyoushi.utils.getPreferencesLazy
+import extensions.utils.getPreferencesLazy
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
@@ -193,9 +193,7 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
         serverBoxes.forEachIndexed { index, box ->
             val serverName = serverNames.getOrElse(index) { "server${index + 1}" }
             val serversNames = SERVER_LIST.firstOrNull { it.equals(serverName, ignoreCase = true) }
-            if (serversNames == null) {
-                return@forEachIndexed
-            }
+                ?: return@forEachIndexed
 
             val iframe = box.selectFirst("iframe.metaframe")
             val src = iframe?.attr("src")?.trim().orEmpty()
@@ -205,9 +203,9 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
             } else {
                 src
             }
-            videos += Video(videoUrl, serversNames, videoUrl)
+            videos.add(Video(videoUrl, serversNames, videoUrl))
         }
-        return videos.sort()
+        return videos // Not sorted by preference yet.
     }
 
     // ---- GET VIDEO LIST ----
@@ -215,24 +213,26 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
         val videos = videoListParse(response)
 
-        for (video in videos) {
+        val videoList = mutableListOf<Video>()
+
+        for (serverEmbedData in videos) {
             try {
-                val extractedVideos = serverVideoResolver(video.url)
+                val extractedVideos = serverVideoResolver(serverEmbedData.url, serverEmbedData.quality)
                 if (extractedVideos.isNotEmpty()) {
-                    return extractedVideos
+                    videoList.addAll(extractedVideos)
                 }
             } catch (e: Exception) {
             }
         }
-        return emptyList()
+        return videoList.sort()
     }
 
-    private fun serverVideoResolver(url: String): List<Video> {
+    private fun serverVideoResolver(url: String, serverName: String): List<Video> {
         return when {
-            url.contains("filemoon") -> filemoonExtractor.videosFromUrl(url, "FileMoon")
-            url.contains("streamtape") -> streamtapeExtractor.videosFromUrl(url, "StreamTape")
-            url.contains("mixdrop") -> mixDropExtractor.videosFromUrl(url, "MixDrop")
-            url.contains("vgembed") || url.contains("vidguard") -> vidGuardExtractor.videosFromUrl(url, "VidGuard")
+            url.contains("filemoon") -> filemoonExtractor.videosFromUrl(url, serverName)
+            url.contains("streamtape") -> streamtapeExtractor.videosFromUrl(url, serverName)
+            url.contains("mixdrop") -> mixDropExtractor.videosFromUrl(url, serverName)
+            url.contains("vgembed") || url.contains("vidguard") -> vidGuardExtractor.videosFromUrl(url, serverName)
             else -> emptyList()
         }
     }
