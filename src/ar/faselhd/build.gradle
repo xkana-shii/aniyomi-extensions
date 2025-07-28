@@ -1,7 +1,7 @@
 ext {
     extName = 'FASELHD'
     extClass = '.FASELHD'
-    extVersionCode = 23
+    extVersionCode = 24
 }
 
 apply from: "$rootDir/common.gradle"
