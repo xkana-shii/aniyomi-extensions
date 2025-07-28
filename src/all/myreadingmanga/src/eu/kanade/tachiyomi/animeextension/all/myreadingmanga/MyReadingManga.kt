@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.animeextension.all.myreadingmanga
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.webkit.CookieManager
 import android.webkit.URLUtil
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
@@ -232,26 +233,45 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return episode
     }
 
-    override fun videoListParse(response: Response): List<Video> {
-        val document = response.asJsoup()
-        val videoUrl = videoUrlParse(document)
-
-        if (videoUrl.isEmpty()) {
-            return emptyList()
-        }
-
-        // Assuming the direct MP4 link is the highest quality available.
-        // You might want to parse quality if it's indicated in the filename or page.
-        val quality =
-            "Default" // You can try to extract quality from the URL if needed, e.g., videoUrl.substringAfterLast("/").substringBefore(".mp4")
-        return listOf(Video(videoUrl, quality, videoUrl))
-    }
-
     override fun videoListSelector(): String = "div.video-container-ads video source"
 
     override fun videoUrlParse(document: Document): String {
-        return document.selectFirst("div.video-container-ads video source")?.attr("src")
+        return document.selectFirst(videoListSelector())?.attr("src")
             ?: throw Exception("No video URL found")
+    }
+
+    override fun videoListParse(response: Response): List<Video> {
+        val document = response.asJsoup()
+        val videoUrl = videoUrlParse(document)
+        if (videoUrl.isEmpty()) return emptyList()
+
+        val refererUrl = response.request.url.toString()
+        val cookieManager = CookieManager.getInstance()
+        val cookies = cookieManager.getCookie(videoUrl) ?: ""
+
+        val customHeaders = Headers.Builder().apply {
+            set("Referer", refererUrl)
+            set("Cookie", cookies)
+            set("User-Agent", USER_AGENT)
+            set("Range", "bytes=0-")
+            set("Accept", "*/*")
+            set("Accept-Encoding", "identity;q=1, *;q=0")
+            set("Accept-Language", "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6")
+            // set("sec-ch-ua", "Chromium;v=\"134\", Not:A-Brand;v=\"24\", Opera GX;v=\"119\"")
+            // set("sec-ch-ua-arch", "x86")
+            // set("sec-ch-ua-bitness", "64")
+            // set("sec-ch-ua-full-version", "119.0.5497.163")
+            // set("sec-ch-ua-full-version-list", "Chromium;v=\"134.0.6998.205\", Not:A-Brand;v=\"24.0.0.0\", Opera GX;v=\"119.0.5497.163\"")
+            // set("sec-ch-ua-mobile", "?0")
+            // set("sec-ch-ua-model", "")
+            // set("sec-ch-ua-platform", "Windows")
+            // set("sec-ch-ua-platform-version", "19.0.0")
+            // set("sec-fetch-dest", "video")
+            // set("sec-fetch-mode", "no-cors")
+            // set("sec-fetch-site", "same-origin")
+        }.build()
+
+        return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
     }
 
     // Filter Parsing, grabs pages as document and filters out Genres, Popular Tags, and Categories, Parings, and Scan Groups
