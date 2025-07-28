@@ -1,5 +1,8 @@
 package eu.kanade.tachiyomi.animeextension.en.blzone
 
+import androidx.preference.ListPreference
+import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -14,19 +17,29 @@ import eu.kanade.tachiyomi.lib.vidguardextractor.VidGuardExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.getPreferencesLazy
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.nio.charset.StandardCharsets
+import kotlin.text.contains
 
-class BLZone : AnimeHttpSource() {
+class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
 
     override val name = "BLZone"
     override val baseUrl = "https://blzone.net"
     override val lang = "en"
     override val supportsLatest = true
+
+    private val preferences by getPreferencesLazy()
+
+    companion object {
+        private const val PREF_SERVER_KEY = "preferred_server"
+        private const val PREF_SERVER_DEFAULT = "Filemoon"
+        private val SERVER_LIST = arrayOf("Filemoon", "StreamTape", "MixDrop", "VidGuard")
+    }
 
     // ---- FILTERS ----
     override fun getFilterList(): AnimeFilterList = AnimeFilterList(TypeFilter())
@@ -215,6 +228,31 @@ class BLZone : AnimeHttpSource() {
                 else -> extractedVideos += Video(url, video.quality.replaceFirstChar { it.uppercase() }, url)
             }
         }
-        return extractedVideos
+        return extractedVideos.sort()
+    }
+
+    override fun List<Video>.sort(): List<Video> {
+        val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
+        return this.sortedWith(
+            compareBy { it.quality.contains(server, true) },
+        ).reversed()
+    }
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        ListPreference(screen.context).apply {
+            key = PREF_SERVER_KEY
+            title = "Preferred server"
+            entries = SERVER_LIST
+            entryValues = SERVER_LIST
+            setDefaultValue(PREF_SERVER_DEFAULT)
+            summary = "%s"
+
+            setOnPreferenceChangeListener { _, newValue ->
+                val selected = newValue as String
+                val index = findIndexOfValue(selected)
+                val entry = entryValues[index] as String
+                preferences.edit().putString(key, entry).commit()
+            }
+        }.also(screen::addPreference)
     }
 }
