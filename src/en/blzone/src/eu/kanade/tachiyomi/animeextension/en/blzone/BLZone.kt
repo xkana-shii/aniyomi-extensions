@@ -229,7 +229,7 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
 
     private fun serverVideoResolver(url: String): List<Video> {
         return when {
-            url.contains("filemoon") -> filemoonExtractor.videosFromUrl(url, "Filemoon")
+            url.contains("filemoon") -> filemoonExtractor.videosFromUrl(url, "FileMoon")
             url.contains("streamtape") -> streamtapeExtractor.videosFromUrl(url, "StreamTape")
             url.contains("mixdrop") -> mixDropExtractor.videosFromUrl(url, "MixDrop")
             url.contains("vgembed") || url.contains("vidguard") -> vidGuardExtractor.videosFromUrl(url, "VidGuard")
