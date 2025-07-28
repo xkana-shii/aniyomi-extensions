@@ -39,7 +39,7 @@ class Sudatchi : AnimeHttpSource(), ConfigurableAnimeSource {
 
     override val supportsLatest = true
 
-    private val codeRegex by lazy { Regex("""\((.*)\)""") }
+    private val langCodeRegex by lazy { Regex("""\((.*)\)""") }
 
     private val preferences by getPreferencesLazy()
 
@@ -58,11 +58,11 @@ class Sudatchi : AnimeHttpSource(), ConfigurableAnimeSource {
 
     override fun popularAnimeParse(response: Response): AnimesPage {
         val titleLang = preferences.title
-        return response.parseAs<SeriesDto>().let {
+        return response.parseAs<SeriesDto>().let { series ->
             AnimesPage(
-                it.results.map { it.toSAnime(titleLang) }
+                series.results.map { it.toSAnime(titleLang) }
                     .filterNot { it.status == SAnime.LICENSED },
-                it.hasNextPage,
+                series.hasNextPage,
             )
         }
     }
@@ -75,8 +75,7 @@ class Sudatchi : AnimeHttpSource(), ConfigurableAnimeSource {
         val titleLang = preferences.title
         return AnimesPage(
             response.parseAs<HomePageDto>().latestEpisodes
-                .map { it.toSAnime(titleLang, baseUrl) }
-                .filterNot { it.status == SAnime.LICENSED },
+                .map { it.toSAnime(titleLang, baseUrl) },
             false,
         )
     }
@@ -166,6 +165,7 @@ class Sudatchi : AnimeHttpSource(), ConfigurableAnimeSource {
     override fun episodeListParse(response: Response): List<SEpisode> {
         val anime = response.parseAs<AnimeDetailDto>()
         return anime.episodes.map { it.toEpisode(animeId = anime.id) }.reversed()
+            .ifEmpty { throw Exception("No episodes found") }
     }
 
     // ============================ Video Links =============================
@@ -213,13 +213,15 @@ class Sudatchi : AnimeHttpSource(), ConfigurableAnimeSource {
     @JvmName("trackSort")
     private fun List<Track>.sort(): List<Track> {
         val subtitles = preferences.subtitles
-        return sortedWith(
-            compareBy(
-                { codeRegex.find(it.lang)!!.groupValues[1] != subtitles },
-                { codeRegex.find(it.lang)!!.groupValues[1] != PREF_SUBTITLES_DEFAULT },
-                { it.lang },
-            ),
-        )
+        return map { (langCodeRegex.find(it.lang)?.groupValues?.getOrNull(1) ?: it.lang) to it }
+            .sortedWith(
+                compareBy(
+                    { it.first != subtitles },
+                    { it.first != PREF_SUBTITLES_DEFAULT },
+                    { it.first },
+                ),
+            )
+            .map { it.second }
     }
 
     override fun List<Video>.sort(): List<Video> {

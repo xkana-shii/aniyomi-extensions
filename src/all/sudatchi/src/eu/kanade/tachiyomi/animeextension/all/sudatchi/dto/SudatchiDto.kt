@@ -30,7 +30,7 @@ data class EpisodeDto(
     fun toSAnime(titleLang: String, baseUrl: String) = SAnime.create().apply {
         url = "/anime/$animeId"
         title = animeTitle?.getTitle(titleLang) ?: this@EpisodeDto.title
-        thumbnail_url = "$baseUrl$coverImage"
+        thumbnail_url = coverImage?.let { "$baseUrl$it" }
     }
 }
 
@@ -100,17 +100,22 @@ data class AnimeDetailDto(
         title = this@AnimeDetailDto.title.getTitle(titleLang)
         description = StringBuilder().apply {
             this@AnimeDetailDto.description?.let { appendLine(it) }
-            appendLine()
-            trailer?.let { appendLine("[Trailer](https://youtube.com/watch?v=${it.id})") }
-            country?.let { appendLine("Country: $it") }
-            season?.let { appendLine("Season: $it") }
-            year?.let { appendLine("Year: $it") }
-            averageScore?.let { appendLine("Score: $it") }
-            appendLine()
-            alternativeNames?.let { list ->
-                if (list.isEmpty()) return@let
+            val details = listOfNotNull(
+                trailer?.let { "[Trailer](https://youtube.com/watch?v=${it.id})" },
+                country?.let { "Country: $it" },
+                season?.let { "Season: $it" },
+                year?.let { "Year: $it" },
+                averageScore?.let { "Score: $it" },
+            )
+            if (details.isNotEmpty()) {
+                appendLine()
+                appendLine(details.joinToString("\n"))
+            }
+
+            alternativeNames?.takeIf { it.isNotEmpty() }?.let { names ->
+                appendLine()
                 appendLine("Alternative names:")
-                list.forEach { appendLine("- $it") }
+                appendLine(names.joinToString("\n") { "- $it" })
             }
         }.toString()
         status = this@AnimeDetailDto.status.parseStatus()
@@ -128,9 +133,9 @@ data class AnimeDetailDto(
 
 private fun String.parseStatus() = when (this) {
     "LICENSED" -> SAnime.LICENSED // Not Yet Released
-    "AIRING" -> SAnime.ONGOING
-    "RELEASING" -> SAnime.ONGOING
+    "AIRING", "RELEASING" -> SAnime.ONGOING
     "FINISHED" -> SAnime.COMPLETED
+    "CANCELLED" -> SAnime.CANCELLED
     else -> SAnime.UNKNOWN
 }
 
