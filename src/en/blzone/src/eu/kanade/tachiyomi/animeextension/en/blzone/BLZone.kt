@@ -215,16 +215,16 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
         val videos = videoListParse(response)
 
+        val extractedVideos = mutableListOf<Video>()
         for (video in videos) {
-            try {
-                val extractedVideos = serverVideoResolver(video.url)
-                if (extractedVideos.isNotEmpty()) {
-                    return extractedVideos
-                }
+            val currentExtracted = try {
+                serverVideoResolver(video.url)
             } catch (e: Exception) {
+                emptyList<Video>()
             }
+            extractedVideos.addAll(currentExtracted)
         }
-        return emptyList()
+        return extractedVideos
     }
 
     private fun serverVideoResolver(url: String): List<Video> {
