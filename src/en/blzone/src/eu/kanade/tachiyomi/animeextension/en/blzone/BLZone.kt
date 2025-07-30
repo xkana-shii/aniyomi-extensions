@@ -18,9 +18,7 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.util.asJsoup
 import extensions.utils.getPreferencesLazy
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -102,11 +100,13 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
 
         if (response.request.url.encodedPath.endsWith("/anime/")) {
             runCatching {
-                val dramaResponse = client.newCall(GET("$baseUrl/dorama/", headers)).execute()
-                val dramaDoc = dramaResponse.asJsoup()
-                animeList.addAll(
-                    dramaDoc.select(".items.full .item.tvshows").map { latestAnimeFromElement(it) },
-                )
+                client.newCall(GET("$baseUrl/dorama/", headers)).execute()
+                    .use { response ->
+                        response.asJsoup()
+                            .select(".items.full .item.tvshows")
+                            .map { latestAnimeFromElement(it) }
+                            .let { animeList.addAll(it) }
+                    }
             }
         }
         return AnimesPage(animeList, hasNextPage = hasNextPage(document))
@@ -200,11 +200,9 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
         val serverBoxes = document.select(".dooplay_player .source-box").drop(1)
 
         return serverBoxes.mapIndexedNotNull { index, box ->
-            val serverName = serverNames.getOrElse(index) { "server${index + 1}" }
-            val serversNames = SERVER_LIST.firstOrNull { it.equals(serverName, ignoreCase = true) }
-            if (serversNames == null) {
-                return@mapIndexedNotNull null
-            }
+            val matchedServerName = serverNames.getOrNull(index)?.let { serverName ->
+                SERVER_LIST.firstOrNull { serverName.contains(it, ignoreCase = true) }
+            } ?: return@mapIndexedNotNull null
 
             val iframe = box.selectFirst("iframe.metaframe")
             val src = iframe?.attr("src")?.trim().orEmpty()
@@ -214,20 +212,18 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
             } else {
                 src
             }
-            Video(videoUrl, serversNames, videoUrl)
+            Video(videoUrl, matchedServerName, videoUrl)
         }
     }
 
     // ---- GET VIDEO LIST ----
-    private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val response = client.newCall(GET(baseUrl + episode.url)).await()
         val videos = videoListParse(response)
 
         return coroutineScope {
             videos.map { video ->
-                scope.async(Dispatchers.IO) {
+                async(Dispatchers.IO) {
                     try {
                         serverVideoResolver(video.url)
                     } catch (e: Exception) {
@@ -251,7 +247,7 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
     override fun List<Video>.sort(): List<Video> {
         val preferredServer = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
         return this.sortedWith(
-            compareByDescending { it.quality.equals(preferredServer, ignoreCase = true) },
+            compareByDescending { it.quality.contains(preferredServer, ignoreCase = true) },
         )
     }
 
@@ -263,13 +259,6 @@ class BLZone : AnimeHttpSource(), ConfigurableAnimeSource {
             entryValues = SERVER_LIST
             setDefaultValue(PREF_SERVER_DEFAULT)
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
-            }
         }.also(screen::addPreference)
     }
 }
