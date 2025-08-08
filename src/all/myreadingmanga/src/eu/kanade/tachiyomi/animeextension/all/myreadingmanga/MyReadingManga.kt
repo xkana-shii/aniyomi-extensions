@@ -253,6 +253,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             set("Accept", "*/*")
             set("Accept-Encoding", "identity;q=1, *;q=0")
             set("Accept-Language", "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6")
+            /* disable -->
             set("sec-ch-ua", "Chromium;v=\"134\", Not:A-Brand;v=\"24\", Opera GX;v=\"119\"")
             set("sec-ch-ua-arch", "x86")
             set("sec-ch-ua-bitness", "64")
@@ -265,6 +266,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             set("sec-fetch-dest", "video")
             set("sec-fetch-mode", "no-cors")
             set("sec-fetch-site", "same-origin")
+            disable <-- */
         }.build()
 
         return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
