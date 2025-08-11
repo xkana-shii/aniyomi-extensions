@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.animeextension.en.zoro
 
 import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.animeextension.BuildConfig
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.lib.megacloudextractor.MegaCloudExtractor
@@ -31,7 +32,7 @@ class HiAnime :
     override val ajaxRoute = "/v2"
 
     private val streamtapeExtractor by lazy { StreamTapeExtractor(client) }
-    private val megaCloudExtractor by LazyMutable { MegaCloudExtractor(client, headers) }
+    private val megaCloudExtractor by LazyMutable { MegaCloudExtractor(client, headers, BuildConfig.MEGACLOUD_API) }
 
     override var baseUrl: String
         by preferences.delegate(PREF_DOMAIN_KEY, PREF_DOMAIN_DEFAULT)

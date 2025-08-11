@@ -21,6 +21,7 @@ import java.net.URLEncoder
 class MegaCloudExtractor(
     private val client: OkHttpClient,
     private val headers: Headers,
+    private val megaCloudAPI: String,
 ) {
     private val json: Json by injectLazy()
 
@@ -84,10 +85,8 @@ class MegaCloudExtractor(
         val m3u8: String = if (".m3u8" in encoded) {
             encoded
         } else {
-            val decodeUrl = "https://script.google.com/macros/s/AKfycbxHbYHbrGMXYD2-bC-C43D3njIbU-wGiYQuJL61H4vyy6YVXkybMNNEPJNPPuZrD1gRVA/exec"
-
             val fullUrl = buildString {
-                append(decodeUrl)
+                append(megaCloudAPI)
                 append("?encrypted_data=").append(URLEncoder.encode(encoded, "UTF-8"))
                 append("&nonce=").append(URLEncoder.encode(nonce, "UTF-8"))
                 append("&secret=").append(URLEncoder.encode(key, "UTF-8"))
