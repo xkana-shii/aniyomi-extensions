@@ -321,7 +321,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class EnforceLanguageFilter(val siteLang: String) : AnimeFilter.CheckBox("Enforce language", true), UriFilter {
         fun indexModifier() = if (state) 0 else 1
         override fun addToUri(uri: Uri.Builder, uriParam: String) {
-            if (state) uri.appendQueryParameter(uriParam, "lang_str:$siteLang")
+            if (state) uri.appendQueryParameter(uriParam, "ep_filter_lang=$siteLang")
         }
     }
 
