@@ -24,10 +24,8 @@ import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.Interceptor
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.logging.HttpLoggingInterceptor
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -54,29 +52,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private data class Credential(val username: String, val password: String)
     private var isLoggedIn: Boolean = false
 
-    // Add a logging interceptor (for ALL requests)
-    private val logging = HttpLoggingInterceptor { message -> println("OkHttp: $message") }.apply {
-        level = HttpLoggingInterceptor.Level.BODY
-    }
-
-    override val client: OkHttpClient = network.client.newBuilder()
-        .addInterceptor(logging)
+    override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            println("=== GENERAL REQUEST START ===")
-            println("Request URL: ${request.url}")
-            println("Request Method: ${request.method}")
-            println("Request Headers: ${request.headers}")
-            println("=== GENERAL REQUEST END ===")
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-            val response = chain.proceed(request.newBuilder().headers(headers).build())
-            println("=== GENERAL RESPONSE START ===")
-            println("Response Code: ${response.code}")
-            println("Response Headers: ${response.headers}")
-            println("=== GENERAL RESPONSE END ===")
-            response
+
+            chain.proceed(request.newBuilder().headers(headers).build())
         }
         .addInterceptor(::loginInterceptor)
         .build()
@@ -189,12 +172,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
         uri.appendQueryParameter("ep_filter_category", "video")
 
-        val fullUrl = uri.toString()
-        println("=== SEARCH REQUEST URL ===")
-        println(fullUrl)
-        println("=========================")
-
-        return GET(fullUrl, headers)
+        return GET(uri.toString(), headers)
     }
 
     override fun searchAnimeNextPageSelector() = "div.archive-pagination li.pagination-next a"
@@ -382,12 +360,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             set("sec-fetch-site", "same-origin")
             disable <-- */
         }.build()
-
-        println("=== VIDEO STREAMING HEADERS START ===")
-        println("Video URL: $videoUrl")
-        println("Referer: $refererUrl")
-        println("Custom Headers: ${customHeaders.toMultimap()}")
-        println("=== VIDEO STREAMING HEADERS END ===")
 
         return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
     }
