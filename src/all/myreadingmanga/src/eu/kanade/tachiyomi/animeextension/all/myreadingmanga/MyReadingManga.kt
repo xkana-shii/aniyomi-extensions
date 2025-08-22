@@ -184,7 +184,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun latestUpdatesNextPageSelector() = "li.pagination-next"
-    override fun latestUpdatesSelector() = "div.content-archive article.post:not(.category-video)"
+    override fun latestUpdatesSelector() = "div.content-archive article.post.category-video"
     override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
     override fun latestUpdatesParse(response: Response): AnimesPage {
         logResponse(response) // LOGGING
@@ -386,23 +386,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             set("Cookie", cookies)
             set("User-Agent", USER_AGENT)
             set("Range", "bytes=0-")
-            set("Accept", "*/*")
-            set("Accept-Encoding", "identity;q=1, *;q=0")
-            set("Accept-Language", "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6")
-            /* disable -->
-            set("sec-ch-ua", "Chromium;v=\"134\", Not:A-Brand;v=\"24\", Opera GX;v=\"119\"")
-            set("sec-ch-ua-arch", "x86")
-            set("sec-ch-ua-bitness", "64")
-            set("sec-ch-ua-full-version", "119.0.5497.163")
-            set("sec-ch-ua-full-version-list", "Chromium;v=\"134.0.6998.205\", Not:A-Brand;v=\"24.0.0.0\", Opera GX;v=\"119.0.5497.163\"")
-            set("sec-ch-ua-mobile", "?0")
-            set("sec-ch-ua-model", "")
-            set("sec-ch-ua-platform", "Windows")
-            set("sec-ch-ua-platform-version", "19.0.0")
-            set("sec-fetch-dest", "video")
-            set("sec-fetch-mode", "no-cors")
-            set("sec-fetch-site", "same-origin")
-            disable <-- */
+            //set("Accept", "*/*")
+            //set("Accept-Encoding", "identity;q=1, *;q=0")
+            //set("Accept-Language", "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6")
         }.build()
 
         // LOGGING: Log the headers and URL that will be used for the video player
