@@ -53,7 +53,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
         val contentType = response.header("Content-Type") ?: ""
         if (contentType.contains("text") || contentType.contains("json") || contentType.contains("xml")) {
-            val responseBody = response.peekBody(1024*10).string() // log up to 10KB
+            val responseBody = response.peekBody(1024 * 10).string() // log up to 10KB
             Log.d("MRM/HTTP-Response", "Body (partial): ${responseBody.take(1000)}")
         }
     }
