@@ -386,9 +386,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             set("Cookie", cookies)
             set("User-Agent", USER_AGENT)
             set("Range", "bytes=0-")
-            //set("Accept", "*/*")
-            //set("Accept-Encoding", "identity;q=1, *;q=0")
-            //set("Accept-Language", "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6")
+            // set("Accept", "*/*")
+            // set("Accept-Encoding", "identity;q=1, *;q=0")
+            // set("Accept-Language", "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6")
         }.build()
 
         // LOGGING: Log the headers and URL that will be used for the video player
