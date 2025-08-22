@@ -147,7 +147,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun latestUpdatesNextPageSelector() = "li.pagination-next"
-    override fun latestUpdatesSelector() = "div.content-archive article.post.category-video"
+    override fun latestUpdatesSelector() = "div.content-archive article.post:has(img[src*=vlcsnap])"
     override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
     override fun latestUpdatesParse(response: Response): AnimesPage {
         cacheAssistant()
