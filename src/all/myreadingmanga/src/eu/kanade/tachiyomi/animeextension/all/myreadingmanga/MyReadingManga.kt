@@ -149,8 +149,13 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun latestUpdatesSelector() = "div.content-archive article.post.category-video"
     override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
     override fun latestUpdatesParse(response: Response): AnimesPage {
-        cacheAssistant()
-        return super.latestUpdatesParse(response)
+        val document = response.asJsoup()
+        val animes = document.select(latestUpdatesSelector()).map { latestUpdatesFromElement(it) }
+
+        // Check for next page element
+        val hasNextPage = document.select("link[rel=next], li.pagination-next").isNotEmpty()
+
+        return AnimesPage(animes, hasNextPage)
     }
 
     // Search
