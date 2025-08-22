@@ -170,6 +170,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             }
         }
 
+        uri.appendQueryParameter("ep_filter_category", "video")
+
         return GET(uri.toString(), headers)
     }
 
