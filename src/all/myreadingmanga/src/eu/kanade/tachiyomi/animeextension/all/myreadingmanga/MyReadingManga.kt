@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
+import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.URLUtil
 import android.widget.Toast
@@ -21,11 +22,7 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.FormBody
-import okhttp3.Headers
-import okhttp3.Interceptor
-import okhttp3.Request
-import okhttp3.Response
+import okhttp3.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -35,6 +32,27 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
+
+    // LOGGING: Utility functions
+    private fun logRequest(request: Request) {
+        Log.d("MRM/HTTP-Request", "URL: ${request.url}")
+        Log.d("MRM/HTTP-Request", "Method: ${request.method}")
+        for ((name, value) in request.headers) {
+            Log.d("MRM/HTTP-Request", "Header: $name = $value")
+        }
+    }
+    private fun logResponse(response: Response) {
+        Log.d("MRM/HTTP-Response", "URL: ${response.request.url}")
+        Log.d("MRM/HTTP-Response", "Status: ${response.code}")
+        for ((name, value) in response.headers) {
+            Log.d("MRM/HTTP-Response", "Header: $name = $value")
+        }
+        val contentType = response.header("Content-Type") ?: ""
+        if (contentType.contains("text") || contentType.contains("json") || contentType.contains("xml")) {
+            val responseBody = response.peekBody(1024*10).string() // log up to 10KB
+            Log.d("MRM/HTTP-Response", "Body (partial): ${responseBody.take(1000)}")
+        }
+    }
 
     // Basic Info
     override val name = "MyReadingManga"
@@ -53,12 +71,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private var isLoggedIn: Boolean = false
 
     override val client = network.client.newBuilder()
+        // LOGGING: add global logging interceptor
+        .addInterceptor { chain ->
+            val request = chain.request()
+            logRequest(request)
+            val response = chain.proceed(request)
+            logResponse(response)
+            response
+        }
         .addInterceptor { chain ->
             val request = chain.request()
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .addInterceptor(::loginInterceptor)
@@ -88,7 +113,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 .build()
 
             val loginRequest = POST("$baseUrl/wp-login.php", headers, loginForm)
+            logRequest(loginRequest) // LOGGING
             val loginResponse = network.client.newCall(loginRequest).execute()
+            logResponse(loginResponse) // LOGGING
 
             if (loginResponse.isSuccessful) {
                 isLoggedIn = true
@@ -98,6 +125,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             }
             return chain.proceed(request)
         } catch (e: Exception) {
+            Log.e("MRM/HTTP-Login", "Exception: ${e.message}")
             return chain.proceed(request)
         }
     }
@@ -129,13 +157,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Popular
     override fun popularAnimeRequest(page: Int): Request {
-        return GET("$baseUrl/popular/", headers)
+        val req = GET("$baseUrl/popular/", headers)
+        logRequest(req) // LOGGING
+        return req
     }
 
     override fun popularAnimeNextPageSelector() = "li.pagination-next"
     override fun popularAnimeSelector() = "div.entry-content ul.wpp-list > li:has(img[src*=vlcsnap])"
     override fun popularAnimeFromElement(element: Element) = buildAnime(element.select(".wpp-post-title").first()!!, element.select("img.wpp-thumbnail").first())
     override fun popularAnimeParse(response: Response): AnimesPage {
+        logResponse(response) // LOGGING
         cacheAssistant()
         return super.popularAnimeParse(response)
     }
@@ -143,13 +174,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     // Latest
     @SuppressLint("DefaultLocale")
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/lang/${latestLang.lowercase()}" + if (page > 1) "/page/$page/" else "", headers) // Home Page - Latest Anime
+        val req = GET("$baseUrl/lang/${latestLang.lowercase()}" + if (page > 1) "/page/$page/" else "", headers)
+        logRequest(req) // LOGGING
+        return req
     }
 
     override fun latestUpdatesNextPageSelector() = "li.pagination-next"
     override fun latestUpdatesSelector() = "div.content-archive article.post:has(img[src*=vlcsnap])"
     override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
     override fun latestUpdatesParse(response: Response): AnimesPage {
+        logResponse(response) // LOGGING
         cacheAssistant()
         return super.latestUpdatesParse(response)
     }
@@ -172,13 +206,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
         uri.appendQueryParameter("ep_filter_category", "video")
 
-        return GET(uri.toString(), headers)
+        val req = GET(uri.toString(), headers)
+        logRequest(req) // LOGGING
+        return req
     }
 
     override fun searchAnimeNextPageSelector() = "div.archive-pagination li.pagination-next a"
     override fun searchAnimeSelector() = "div.content-archive article.post"
     private var animeParsedSoFar = 0
     override fun searchAnimeParse(response: Response): AnimesPage {
+        logResponse(response) // LOGGING
         val document = response.asJsoup()
         val currentUrl = document.location()
         if (!currentUrl.contains("/page/") || currentUrl.contains("/page/1/")) {
@@ -242,6 +279,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         } ?: true
 
         val response = client.newCall(animeDetailsRequest(anime)).awaitSuccess()
+        logResponse(response) // LOGGING
         return animeDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
     }
 
@@ -284,6 +322,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     @SuppressLint("DefaultLocale")
     override fun episodeListParse(response: Response): List<SEpisode> {
+        logResponse(response) // LOGGING
         val document = response.asJsoup()
         val episodes = mutableListOf<SEpisode>()
 
@@ -329,6 +368,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun videoListParse(response: Response): List<Video> {
+        logResponse(response) // LOGGING
         val document = response.asJsoup()
         val videoUrl = videoUrlParse(document)
         if (videoUrl.isEmpty()) return emptyList()
@@ -361,6 +401,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             disable <-- */
         }.build()
 
+        // LOGGING: Log the headers and URL that will be used for the video player
+        Log.d("MRM/Video-Player", "VideoUrl: $videoUrl")
+        for ((name, value) in customHeaders) {
+            Log.d("MRM/Video-Player", "Header: $name = $value")
+        }
+
         return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
     }
 
@@ -370,6 +416,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     // Grabs page containing filters and puts it into cache
     private fun filterAssist(url: String) {
         val response = client.newCall(GET(url, headers)).execute()
+        logResponse(response) // LOGGING
         filterMap[url] = response.body.string()
     }
 
