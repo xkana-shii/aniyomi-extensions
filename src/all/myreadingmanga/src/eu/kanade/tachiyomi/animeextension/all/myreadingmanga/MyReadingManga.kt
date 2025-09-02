@@ -315,7 +315,13 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             ?: throw Exception("No video URL found")
     }
 
-    override fun videoListParse(response: Response): List<Video> = throw UnsupportedOperationException()
+    override fun videoListParse(response: Response): List<Video> {
+        val document = response.asJsoup()
+        val videoUrl = videoUrlParse(document)
+        val quality = "Default"
+        val video = Video(videoUrl, quality, videoUrl, headers)
+        return listOf(video)
+    }
 
     /*
      * ========== Parse filters from pages ==========
