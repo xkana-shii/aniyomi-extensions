@@ -316,24 +316,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             ?: throw Exception("No video URL found")
     }
 
-    override fun videoListParse(response: Response): List<Video> {
-        val document = response.asJsoup()
-        val videoUrl = videoUrlParse(document)
-        if (videoUrl.isEmpty()) return emptyList()
-
-        val refererUrl = response.request.url.toString()
-        val cookieManager = CookieManager.getInstance()
-        val cookies = cookieManager.getCookie(videoUrl) ?: ""
-
-        val customHeaders = Headers.Builder().apply {
-            set("Referer", refererUrl)
-            set("Cookie", cookies)
-            set("User-Agent", USER_AGENT)
-            set("Range", "bytes=0-")
-        }.build()
-
-        return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
-    }
+    override fun videoListParse(response: Response): List<Video> = throw UnsupportedOperationException()
 
     /*
      * ========== Parse filters from pages ==========
