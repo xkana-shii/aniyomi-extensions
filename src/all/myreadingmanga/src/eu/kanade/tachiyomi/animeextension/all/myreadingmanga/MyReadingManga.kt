@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
-import android.webkit.CookieManager
 import android.webkit.URLUtil
 import android.widget.Toast
 import androidx.preference.EditTextPreference
