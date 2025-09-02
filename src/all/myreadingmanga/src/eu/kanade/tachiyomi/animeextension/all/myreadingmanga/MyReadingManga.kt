@@ -144,8 +144,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      * ========== Latest ==========
      */
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/?ep_filter_lang=${latestLang.lowercase()}&ep_filter_category=video&s=", headers)
+        val uri = Uri.parse(baseUrl).buildUpon()
+            .appendQueryParameter("ep_filter_lang", latestLang.lowercase())
+            .appendQueryParameter("ep_filter_category", "video")
+            .appendQueryParameter("s", "")
+        if (page > 1) {
+            uri.appendQueryParameter("paged", page.toString())
+        }
+        return GET(uri.toString(), headers)
     }
+
     override fun latestUpdatesNextPageSelector(): String? = "li.pagination-next"
     override fun latestUpdatesSelector() = "article.category-video"
     override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a.entry-title-link").first()!!, element.select("a.entry-image-link img").first())
