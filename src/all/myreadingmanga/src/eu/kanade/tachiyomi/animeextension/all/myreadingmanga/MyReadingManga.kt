@@ -178,7 +178,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun searchAnimeNextPageSelector(): String? = "li.pagination-next"
-    override fun searchAnimeSelector() = "article.category-video)"
+    override fun searchAnimeSelector() = "article.category-video"
     override fun searchAnimeFromElement(element: Element) = buildAnime(element.select("a.entry-title-link").first()!!, element.select("a.entry-image-link img").first())
     override fun searchAnimeParse(response: Response): AnimesPage {
         cacheAssistant()
