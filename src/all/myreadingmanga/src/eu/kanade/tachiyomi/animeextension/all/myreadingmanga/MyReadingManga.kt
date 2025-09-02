@@ -313,9 +313,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override fun videoListSelector(): String = "div.video-container-ads video source"
 
-    override fun videoFromElement(element: Element): Video {
-        TODO("Not yet implemented")
-    }
+    override fun videoFromElement(element: Element) = throw UnsupportedOperationException()
 
     override fun videoUrlParse(document: Document): String {
         return document.selectFirst(videoListSelector())?.attr("src")
