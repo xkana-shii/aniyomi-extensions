@@ -310,8 +310,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun episodeFromElement(element: Element) = throw UnsupportedOperationException()
 
     /*
-    * ========== Building videos from element ==========
-    */
+     * ========== Building videos from element ==========
+     */
 
     override fun videoListSelector(): String = "div.video-container-ads video source"
 
