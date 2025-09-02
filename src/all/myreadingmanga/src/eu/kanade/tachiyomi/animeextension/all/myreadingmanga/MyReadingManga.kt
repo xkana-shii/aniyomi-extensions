@@ -221,11 +221,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Anime Details
     override suspend fun getAnimeDetails(anime: SAnime): SAnime {
-        val needCover = anime.thumbnail_url?.let {
-            runCatching {
-                !client.newCall(GET(it, headers)).awaitSuccess().isSuccessful
-            }.getOrDefault(true)
-        } ?: true
+        val needCover = anime.thumbnail_url?.let { !client.newCall(GET(it, headers)).execute().isSuccessful } ?: true
 
         val response = client.newCall(animeDetailsRequest(anime)).awaitSuccess()
         return animeDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
