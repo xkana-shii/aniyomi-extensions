@@ -327,6 +327,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun videoListParse(response: Response): List<Video> {
+        if (!response.isSuccessful) {
+            if (response.code == 403) {throw Exception("Download the episode before watching (Error 403)")
+            }
+            throw Exception("Failed to fetch video list: HTTP ${response.code}")
+        }
+
         val document = response.asJsoup()
         val videoUrl = videoUrlParse(document)
         if (videoUrl.isEmpty()) return emptyList()
