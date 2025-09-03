@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
-import android.util.Log
+import android.webkit.CookieManager
 import android.webkit.URLUtil
 import android.widget.Toast
 import androidx.preference.EditTextPreference
@@ -23,7 +23,6 @@ import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.FormBody
 import okhttp3.Headers
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
@@ -40,16 +39,10 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     // Basic Info
     override val name = "MyReadingManga"
     final override val baseUrl = "https://myreadingmanga.info"
-    override fun headersBuilder(): Headers.Builder {
-        val builder = super.headersBuilder()
+    override fun headersBuilder(): Headers.Builder =
+        super.headersBuilder()
             .set("User-Agent", USER_AGENT)
             .add("X-Requested-With", randomString((1..20).random()))
-
-        Log.d(TAG, "headersBuilder: User-Agent set to $USER_AGENT")
-        Log.d(TAG, "headersBuilder: X-Requested-With generated value is accessible if you store it before adding")
-
-        return builder
-    }
 
     private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     private val credentials: Credential get() = Credential(
@@ -61,22 +54,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
-            var request = chain.request()
-            Log.d(TAG, "OkHttp Interceptor (Pre-Modification): Request to ${request.url}")
-            request.headers.forEach { (name, value) ->
-                Log.d(TAG, "OkHttp Interceptor (Pre-Modification): Header: $name = $value")
-            }
-
-            val modifiedHeaders = request.headers.newBuilder().apply {
+            val request = chain.request()
+            val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-            request = request.newBuilder().headers(modifiedHeaders).build()
-
-            Log.d(TAG, "OkHttp Interceptor (Post-Modification): Request to ${request.url}")
-            request.headers.forEach { (name, value) ->
-                Log.d(TAG, "OkHttp Interceptor (Post-Modification): Header: $name = $value")
-            }
-            chain.proceed(request)
+            chain.proceed(request.newBuilder().headers(headers).build())
         }
         .addInterceptor(::loginInterceptor)
         .build()
@@ -304,22 +286,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         // create first episode since its on main anime page
         episodes.add(createEpisode("1", baseAnimeUrl, date, "Ep. 1")) // Pass cleaned URL
         // see if there are multiple episodes or not
-        val lastEpisodeNumber = document.select(episodeListSelector()).lastOrNull()?.text()
+        val lastEpisodeNumber = document.select(episodeListSelector()).last()?.text()
         if (lastEpisodeNumber != null) {
-            try {
-                val lastNum = lastEpisodeNumber.toInt()
-                // There are entries with more episodes but those never show up,
-                // so we take the last one and loop it to get all hidden ones.
-                // Example: 1 2 3 4 .. 7 8 9 Next
-                for (i in 2..lastNum) { // Ensure lastNum is valid before looping
-                    episodes.add(createEpisode(i.toString(), baseAnimeUrl, date, "Ep. $i")) // Pass cleaned URL
-                }
-            } catch (e: NumberFormatException) {
-                Log.e(TAG, "Failed to parse last episode number: $lastEpisodeNumber", e)
-                // Handle error, maybe don't add further episodes or log appropriately
+            // There are entries with more episodes but those never show up,
+            // so we take the last one and loop it to get all hidden ones.
+            // Example: 1 2 3 4 .. 7 8 9 Next
+            for (i in 2..lastEpisodeNumber.toInt()) {
+                episodes.add(createEpisode(i.toString(), document.baseUri(), date, "Ep. $i"))
             }
         }
-        return episodes.reversed() // Reverse at the end
+        return episodes.reversed()
     }
 
     private fun parseDate(date: String): Long {
@@ -346,56 +322,26 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun videoFromElement(element: Element) = throw UnsupportedOperationException()
 
     override fun videoUrlParse(document: Document): String {
-        val videoElement = document.selectFirst(videoListSelector())
-        if (videoElement != null) {
-            val url = videoElement.attr("abs:src")
-            if (url.isNotBlank()) {
-                return url
-            } else {
-                throw Exception("Video URL is blank")
-            }
-        }
-        throw Exception("No video URL found with selector: ${videoListSelector()}")
+        return document.selectFirst(videoListSelector())?.attr("src")
+            ?: throw Exception("No video URL found")
     }
 
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
-        val videoUrlString = videoUrlParse(document) // Ensure this returns ABSOLUTE URL
-        val quality = "Default"
-        val episodeUrl = response.request.url.toString() // Page URL for Referer
+        val videoUrl = videoUrlParse(document)
+        if (videoUrl.isEmpty()) return emptyList()
 
-        Log.d(TAG, "videoListParse: Preparing video request for URL: $videoUrlString")
-        Log.d(TAG, "videoListParse: Referer for video request: $episodeUrl")
+        val refererUrl = response.request.url.toString()
+        val cookieManager = CookieManager.getInstance()
+        val cookies = cookieManager.getCookie(videoUrl) ?: ""
 
-        val videoRequestHeadersBuilder = Headers.Builder()
-        videoRequestHeadersBuilder.add("User-Agent", USER_AGENT)
-        videoRequestHeadersBuilder.add("Referer", episodeUrl)
+        val customHeaders = Headers.Builder().apply {
+            set("Referer", refererUrl)
+            set("Cookie", cookies)
+            set("User-Agent", USER_AGENT)
+        }.build()
 
-        val videoHttpUrl: okhttp3.HttpUrl? = videoUrlString.toHttpUrlOrNull() // Explicit type
-        if (videoHttpUrl != null) {
-            val cookies: List<okhttp3.Cookie> = client.cookieJar.loadForRequest(videoHttpUrl) // Explicit type
-            if (cookies.isNotEmpty()) {
-                val cookieHeader = cookies.joinToString(separator = "; ") { cookie ->
-                    "${cookie.name}=${cookie.value}"
-                }
-                Log.d(TAG, "videoListParse: Adding Cookies from CookieJar: $cookieHeader")
-                videoRequestHeadersBuilder.add("Cookie", cookieHeader)
-            } else {
-                Log.d(TAG, "videoListParse: No cookies found in CookieJar for $videoUrlString")
-            }
-        } else {
-            Log.w(TAG, "videoListParse: Could not parse videoUrlString to HttpUrl: $videoUrlString")
-        }
-
-        val videoRequestHeaders = videoRequestHeadersBuilder.build()
-
-        Log.d(TAG, "videoListParse: Final headers for video request:")
-        videoRequestHeaders.forEach { (name, value) ->
-            Log.d(TAG, "videoListParse: Video Header: $name = $value")
-        }
-
-        val video = Video(videoUrlString, quality, videoUrlString, headers = videoRequestHeaders)
-        return listOf(video)
+        return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
     }
 
     /*
@@ -504,7 +450,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     companion object {
-        private const val TAG = "MyReadingManga"
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.7258.159 Mobile Safari/537.36"
         private const val USERNAME_PREF = "MYREADINGMANGA_USERNAME"
         private const val PASSWORD_PREF = "MYREADINGMANGA_PASSWORD"
