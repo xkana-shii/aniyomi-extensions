@@ -232,11 +232,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         var cleanedTitle = title
         cleanedTitle = cleanedTitle.substringAfter(": ", cleanedTitle).trimStart()
         cleanedTitle = cleanedTitle.replace(titleRegex, " ").trim()
-        if (cleanedTitle.endsWith(")")) {
-            val lastOpenParenIndex = cleanedTitle.lastIndexOf('(')
-            if (lastOpenParenIndex != -1 && cleanedTitle.indexOf(')', lastOpenParenIndex) == cleanedTitle.length - 1) {
-                cleanedTitle = cleanedTitle.substring(0, lastOpenParenIndex).trimEnd()
-            }
+        if (cleanedTitle.endsWith(")") && cleanedTitle.lastIndexOf('(') != -1) {
+            cleanedTitle = cleanedTitle.substringBeforeLast("(").trimEnd()
         }
         return cleanedTitle.replace(Regex("\\s+"), " ").trim()
     }
