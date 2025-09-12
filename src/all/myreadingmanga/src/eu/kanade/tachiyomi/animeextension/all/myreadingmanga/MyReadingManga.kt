@@ -36,12 +36,14 @@ import java.util.Locale
 
 open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
-    // Basic Info
+    /*
+     *  ========== Basic Info ==========
+     */
     override val name = "MyReadingManga"
     final override val baseUrl = "https://myreadingmanga.info"
     override fun headersBuilder(): Headers.Builder =
         super.headersBuilder()
-            .set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.7258.159 Mobile Safari/537.36")
+            .set("User-Agent", "Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.7258.159 Mobile Safari/537.36")
             .add("X-Requested-With", randomString((1..20).random()))
 
     private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
@@ -58,6 +60,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
+
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .addInterceptor(::loginInterceptor)
@@ -144,6 +147,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     /*
      * ========== Latest ==========
      */
+    @SuppressLint("DefaultLocale")
     override fun latestUpdatesRequest(page: Int): Request {
         val uri = Uri.parse(baseUrl).buildUpon()
             .appendQueryParameter("ep_filter_lang", latestLang.lowercase())
@@ -222,10 +226,21 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val url = thumbnailUrl.substringBeforeLast("-") + "." + thumbnailUrl.substringAfterLast(".")
         return if (URLUtil.isValidUrl(url)) url else null
     }
+    private val titleRegex = Regex("""\s*\[[^]]*]\s*""")
+    private fun cleanTitle(title: String): String {
+        var cleanedTitle = title.replace(titleRegex, " ").trim()
 
-    // cleans up the name removing author and language from the title
-    private val titleRegex = Regex("""^(\w+):|\[[^]]*]|\([^)]*\)""")
-    private fun cleanTitle(title: String) = title.replace(titleRegex, "").substringBeforeLast("(").trim()
+        if (cleanedTitle.endsWith(")")) {
+            val lastOpenParenIndex = cleanedTitle.lastIndexOf('(')
+            if (lastOpenParenIndex != -1 && cleanedTitle.indexOf(')', lastOpenParenIndex) == cleanedTitle.length - 1) {
+                cleanedTitle = cleanedTitle.substring(0, lastOpenParenIndex).trimEnd()
+            }
+        }
+
+        cleanedTitle = cleanedTitle.replace(Regex("\\s+"), " ")
+
+        return cleanedTitle
+    }
 
     // Anime Details
     override suspend fun getAnimeDetails(anime: SAnime): SAnime {
@@ -281,10 +296,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val episodes = mutableListOf<SEpisode>()
 
         val date = parseDate(document.select(".entry-time").text())
-        val baseAnimeUrl = document.baseUri().removeSuffix("/") // Clean the base URL once
-
         // create first episode since its on main anime page
-        episodes.add(createEpisode("1", baseAnimeUrl, date, "Ep. 1")) // Pass cleaned URL
+        episodes.add(createEpisode("1", document.baseUri(), date, "Ep. 1"))
         // see if there are multiple episodes or not
         val lastEpisodeNumber = document.select(episodeListSelector()).last()?.text()
         if (lastEpisodeNumber != null) {
@@ -304,8 +317,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     private fun createEpisode(pageNumber: String, animeUrl: String, date: Long, epname: String): SEpisode {
         val episode = SEpisode.create()
-        val cleanAnimeUrl = animeUrl.removeSuffix("/")
-        episode.setUrlWithoutDomain("$cleanAnimeUrl/$pageNumber")
+        episode.setUrlWithoutDomain("$animeUrl/$pageNumber")
         episode.name = epname
         episode.date_upload = date
         return episode
@@ -338,14 +350,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val videoUrl = videoUrlParse(document)
         if (videoUrl.isEmpty()) return emptyList()
 
-        val refererUrl = response.request.url.toString()
         val cookieManager = CookieManager.getInstance()
         val cookies = cookieManager.getCookie(videoUrl) ?: ""
 
-        val customHeaders = Headers.Builder().apply {
-            set("Referer", refererUrl)
+        val baseHeaders = headersBuilder().build()
+        val customHeaders = baseHeaders.newBuilder().apply {
             set("Cookie", cookies)
-            set("User-Agent", USER_AGENT)
         }.build()
 
         return listOf(Video(videoUrl, "Default", videoUrl, customHeaders))
@@ -359,7 +369,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      * display the top 25 results for each filter category. Since these lists aren't exhaustive, we
      * call them "Popular"
      *
-     * TODO : MRM have a meta sitemap (https://myreadinganime.info/sitemap_index.xml) that links to
+     * TODO : MRM have a meta sitemap (https://myreadingmanga.info/sitemap_index.xml) that links to
      * tag/genre/pairing/etc xml sitemaps. Filters could be populated from those instead of HTML pages
      */
     private var filtersCached = false
@@ -396,7 +406,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     // Parses search page for filters
-    private fun getFiltersFromSearchPage(filterTitle: String): List<MrmFilter> {
+    private fun getFiltersFromSearchPage(filterTitle: String, isSelectDropdown: Boolean = false): List<MrmFilter> {
         val document = if (searchPage == "") {
             filtersCached = false
             null
@@ -405,14 +415,21 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             Jsoup.parse(searchPage)
         }
         val parent = document?.select(".ep-filter-title")?.first { it.text() == filterTitle }?.parent()
-        return parent?.select(".term")?.map { MrmFilter(it.text(), it.attr("data-term-slug")) }
-            ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
+
+        val filters: List<MrmFilter>? = if (isSelectDropdown) {
+            parent?.select("option")?.map { MrmFilter(it.text(), it.attr("value")) }
+        } else {
+            parent?.select(".term")?.map { MrmFilter(it.text(), it.attr("data-term-slug")) }
+        }
+
+        return filters ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
     }
 
     // Generates the filter lists for app
     override fun getFilterList(): AnimeFilterList {
         return AnimeFilterList(
             EnforceLanguageFilter(siteLang),
+            SearchSortTypeList(getFiltersFromSearchPage("Sort by", true)),
             GenreFilter(getFiltersFromMainPage("Genres")),
             CatFilter(getFiltersFromSearchPage("Category")),
             TagFilter(getFiltersFromSearchPage("Tag")),
@@ -428,6 +445,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
+    private class SearchSortTypeList(SORT: List<MrmFilter>) : UriSelectOneFilter("Sort by", "ep_sort", SORT)
     private class GenreFilter(GENRES: List<MrmFilter>) : UriSelectFilter("Genre", "ep_filter_genre", GENRES)
     private class CatFilter(CATID: List<MrmFilter>) : UriSelectFilter("Popular Categories", "ep_filter_category", CATID)
     private class TagFilter(POPTAG: List<MrmFilter>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", POPTAG)
@@ -439,13 +457,26 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private open class UriSelectFilter(
         displayName: String,
         val uriParam: String,
-        val vals: List<MrmFilter>,
+        vals: List<MrmFilter>,
     ) : AnimeFilter.Group<MrmFilter>(displayName, vals), UriFilter {
         override fun addToUri(uri: Uri.Builder) {
             val checked = state.filter { it.state }.ifEmpty { return }
                 .joinToString(",") { it.value }
 
             uri.appendQueryParameter(uriParam, checked)
+        }
+    }
+
+    private open class UriSelectOneFilter(
+        displayName: String,
+        val uriParam: String,
+        val vals: List<MrmFilter>,
+        defaultValue: Int = 0,
+    ) : AnimeFilter.Select<String>(displayName, vals.map { it.name }.toTypedArray(), defaultValue), UriFilter {
+        override fun addToUri(uri: Uri.Builder) {
+            if (state != 0) {
+                uri.appendQueryParameter(uriParam, vals[state].value)
+            }
         }
     }
 
