@@ -33,6 +33,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.text.replace
 
 open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
@@ -228,18 +229,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
     private val titleRegex = Regex("""\s*\[[^]]*]\s*""")
     private fun cleanTitle(title: String): String {
-        var cleanedTitle = title.replace(titleRegex, " ").trim()
-
+        var cleanedTitle = title
+        cleanedTitle = cleanedTitle.substringAfter(": ", cleanedTitle).trimStart()
+        cleanedTitle = cleanedTitle.replace(titleRegex, " ").trim()
         if (cleanedTitle.endsWith(")")) {
             val lastOpenParenIndex = cleanedTitle.lastIndexOf('(')
             if (lastOpenParenIndex != -1 && cleanedTitle.indexOf(')', lastOpenParenIndex) == cleanedTitle.length - 1) {
                 cleanedTitle = cleanedTitle.substring(0, lastOpenParenIndex).trimEnd()
             }
         }
-
-        cleanedTitle = cleanedTitle.replace(Regex("\\s+"), " ")
-
-        return cleanedTitle
+        return cleanedTitle.replace(Regex("\\s+"), " ").trim()
     }
 
     // Anime Details
