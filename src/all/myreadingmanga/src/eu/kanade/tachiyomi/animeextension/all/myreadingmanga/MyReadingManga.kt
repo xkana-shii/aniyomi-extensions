@@ -227,7 +227,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val url = thumbnailUrl.substringBeforeLast("-") + "." + thumbnailUrl.substringAfterLast(".")
         return if (URLUtil.isValidUrl(url)) url else null
     }
-    private val titleRegex = Regex("""\s*\[[^]]*]\s*|\s*\(\d{4}\)$""")
+    private val titleRegex = Regex("""\s*\[[^]]*]\s*|\s*\(\d{4}\)\s*""")
     private fun cleanTitle(title: String): String {
         var cleanedTitle = title
         cleanedTitle = cleanedTitle.substringAfter(": ", cleanedTitle).trimStart()
