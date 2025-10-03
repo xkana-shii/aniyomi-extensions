@@ -7,7 +7,6 @@ import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.URLUtil
 import android.widget.Toast
-import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
@@ -19,8 +18,13 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
+import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
+import extensions.utils.LazyMutable
+import extensions.utils.addEditTextPreference
+import extensions.utils.delegate
+import extensions.utils.getPreferencesLazy
 import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.Interceptor
@@ -33,7 +37,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
-import kotlin.text.replace
+import java.util.concurrent.atomic.AtomicBoolean
 
 open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
@@ -42,18 +46,28 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      */
     override val name = "MyReadingManga"
     final override val baseUrl = "https://myreadingmanga.info"
+
     override fun headersBuilder(): Headers.Builder =
         super.headersBuilder()
             .set("User-Agent", "Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.7258.159 Mobile Safari/537.36")
             .add("X-Requested-With", randomString((1..20).random()))
 
-    private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    private val credentials: Credential get() = Credential(
-        username = preferences.getString(USERNAME_PREF, "") ?: "",
-        password = preferences.getString(PASSWORD_PREF, "") ?: "",
-    )
+    private val preferences by getPreferencesLazy()
+
+    private val SharedPreferences.username by preferences.delegate(USERNAME_PREF, "")
+    private val SharedPreferences.password by preferences.delegate(PASSWORD_PREF, "")
+
+    private var credentials: Credential by LazyMutable { newCredential() }
+    private var isLoggedIn = AtomicBoolean(false)
+
     private data class Credential(val username: String, val password: String)
-    private var isLoggedIn: Boolean = false
+    private fun newCredential(): Credential {
+        isLoggedIn.set(false)
+        return Credential(
+            username = preferences.username,
+            password = preferences.password,
+        )
+    }
 
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
@@ -77,7 +91,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             return chain.proceed(request)
         }
 
-        if (isLoggedIn) {
+        if (isLoggedIn.get()) {
             return chain.proceed(request)
         }
 
@@ -91,13 +105,17 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 .build()
 
             val loginRequest = POST("$baseUrl/wp-login.php", headers, loginForm)
-            val loginResponse = network.client.newCall(loginRequest).execute()
-
-            if (loginResponse.isSuccessful) {
-                isLoggedIn = true
-                return chain.proceed(request)
-            } else {
-                Toast.makeText(Injekt.get<Application>(), "MyReadingManga login failed. Please check your credentials.", Toast.LENGTH_LONG).show()
+            network.client.newCall(loginRequest).execute().use { loginResponse ->
+                if (loginResponse.isSuccessful) {
+                    isLoggedIn.set(true)
+                    return chain.proceed(request)
+                } else {
+                    Toast.makeText(
+                        Injekt.get<Application>(),
+                        "MyReadingManga login failed. Please check your credentials.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
             return chain.proceed(request)
         } catch (_: Exception) {
@@ -107,27 +125,29 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Preference Screen
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        val application = Injekt.get<Application>()
-        val usernamePref = EditTextPreference(screen.context).apply {
-            key = USERNAME_PREF
-            title = "Username"
-            summary = "Enter your username"
-            setOnPreferenceChangeListener { _, _ ->
-                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
-                true
-            }
+        fun String.usernameSummary() = ifBlank { "Enter your username" }
+        fun String.passwordSummary() = if (this.isBlank()) "Enter your password" else "*".repeat(this.length)
+
+        screen.addEditTextPreference(
+            key = USERNAME_PREF,
+            title = "Username",
+            dialogMessage = "Enter your username",
+            summary = preferences.username.usernameSummary(),
+            getSummary = { it.usernameSummary() },
+            default = "",
+        ) {
+            credentials = newCredential()
         }
-        val passwordPref = EditTextPreference(screen.context).apply {
-            key = PASSWORD_PREF
-            title = "Password"
-            summary = "Enter your password"
-            setOnPreferenceChangeListener { _, _ ->
-                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
-                true
-            }
+        screen.addEditTextPreference(
+            key = PASSWORD_PREF,
+            title = "Password",
+            dialogMessage = "Enter your password",
+            summary = preferences.password.passwordSummary(),
+            getSummary = { it.passwordSummary() },
+            default = "",
+        ) {
+            credentials = newCredential()
         }
-        screen.addPreference(usernamePref)
-        screen.addPreference(passwordPref)
     }
 
     /*
@@ -179,7 +199,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             .appendQueryParameter("s", query)
         filterList.forEach { filter ->
             // If enforce language is checked, then apply language filter automatically
-            if (filter is EnforceLanguageFilter && filter.state) {
+            if (filter is EnforceLanguageFilter) {
                 filter.addToUri(uri)
             } else if (filter is UriFilter) {
                 filter.addToUri(uri)
@@ -203,28 +223,27 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val anime = SAnime.create().apply {
             setUrlWithoutDomain(titleElement.attr("href"))
             title = cleanTitle(titleElement.text())
+            thumbnailElement?.getImage()?.getThumbnail()?.let { thumbnail_url = it }
         }
-        if (thumbnailElement != null) anime.thumbnail_url = getThumbnail(getImage(thumbnailElement))
         return anime
     }
 
     private val extensionRegex = Regex("""\.(jpg|png|jpeg|webp)""")
 
-    private fun getImage(element: Element): String? {
+    private fun Element.getImage(): String? {
         val url = when {
-            element.attr("data-src").contains(extensionRegex) -> element.attr("abs:data-src")
-            element.attr("data-cfsrc").contains(extensionRegex) -> element.attr("abs:data-cfsrc")
-            element.attr("src").contains(extensionRegex) -> element.attr("abs:src")
-            else -> element.attr("abs:data-lazy-src")
+            attr("data-src").contains(extensionRegex) -> attr("abs:data-src")
+            attr("data-cfsrc").contains(extensionRegex) -> attr("abs:data-cfsrc")
+            attr("src").contains(extensionRegex) -> attr("abs:src")
+            else -> attr("abs:data-lazy-src")
         }
 
         return if (URLUtil.isValidUrl(url)) url else null
     }
 
     // removes resizing
-    private fun getThumbnail(thumbnailUrl: String?): String? {
-        thumbnailUrl ?: return null
-        val url = thumbnailUrl.substringBeforeLast("-") + "." + thumbnailUrl.substringAfterLast(".")
+    private fun String.getThumbnail(): String? {
+        val url = substringBeforeLast("-") + "." + substringAfterLast(".")
         return if (URLUtil.isValidUrl(url)) url else null
     }
     private val titleRegex = Regex("""\s*\[[^]]*]\s*|\s*\(\d{4}\)\s*""")
@@ -240,7 +259,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Anime Details
     override suspend fun getAnimeDetails(anime: SAnime): SAnime {
-        val needCover = anime.thumbnail_url?.let { !client.newCall(GET(it, headers)).execute().isSuccessful } ?: true
+        val needCover = anime.thumbnail_url?.let { url ->
+            client.newCall(GET(url, headers)).await().use { !it.isSuccessful }
+        } ?: true
 
         val response = client.newCall(animeDetailsRequest(anime)).awaitSuccess()
         return animeDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
@@ -269,12 +290,13 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             }
 
             if (needCover) {
-                thumbnail_url = getThumbnail(
-                    getImage(
-                        client.newCall(GET("$baseUrl/search/?search=${document.location()}", headers))
-                            .execute().asJsoup().select("div.wdm_results div.p_content img").first()!!,
-                    ),
-                )
+                client.newCall(GET("$baseUrl/search/?search=${document.location()}", headers))
+                    .execute()
+                    .use { response ->
+                        response.asJsoup().selectFirst("div.wdm_results div.p_content img")
+                            ?.getImage()?.getThumbnail()
+                            ?.let { thumbnail_url = it }
+                    }
             }
         }
     }
@@ -295,12 +317,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         // create first episode since its on main anime page
         episodes.add(createEpisode("1", document.baseUri(), date, "Ep. 1"))
         // see if there are multiple episodes or not
-        val lastEpisodeNumber = document.select(episodeListSelector()).last()?.text()
+        val lastEpisodeNumber = document.select(episodeListSelector()).last()?.text()?.toIntOrNull()
         if (lastEpisodeNumber != null) {
             // There are entries with more episodes but those never show up,
             // so we take the last one and loop it to get all hidden ones.
             // Example: 1 2 3 4 .. 7 8 9 Next
-            for (i in 2..lastEpisodeNumber.toInt()) {
+            for (i in 2..lastEpisodeNumber) {
                 episodes.add(createEpisode(i.toString(), document.baseUri(), date, "Ep. $i"))
             }
         }
@@ -374,8 +396,10 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Grabs page containing filters and puts it into cache
     private fun filterAssist(url: String): String {
-        val response = client.newCall(GET(url, headers)).execute()
-        return response.body.string()
+        return client.newCall(GET(url, headers)).execute().use {
+            if (!it.isSuccessful) return ""
+            it.body.string()
+        }
     }
 
     private fun cacheAssistant() {
@@ -387,7 +411,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     // Parses main page for filters
-    private fun getFiltersFromMainPage(filterTitle: String): List<MrmFilter> {
+    private fun getFiltersFromMainPage(@Suppress("SameParameterValue") filterTitle: String): List<MrmFilter> {
         val document = if (mainPage == "") {
             filtersCached = false
             null
@@ -395,7 +419,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             Jsoup.parse(mainPage)
         }
-        val parent = document?.select(".widget-title")?.first { it.text() == filterTitle }?.parent()
+        val parent = document?.select(".widget-title")?.firstOrNull { it.text() == filterTitle }?.parent()
         return parent?.select(".tag-cloud-link")
             ?.map { MrmFilter(it.text(), it.attr("href").split("/").reversed()[1]) }
             ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
@@ -410,7 +434,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             Jsoup.parse(searchPage)
         }
-        val parent = document?.select(".ep-filter-title")?.first { it.text() == filterTitle }?.parent()
+        val parent = document?.select(".ep-filter-title")?.firstOrNull { it.text() == filterTitle }?.parent()
 
         val filters: List<MrmFilter>? = if (isSelectDropdown) {
             parent?.select("option")?.map { MrmFilter(it.text(), it.attr("value")) }
@@ -441,13 +465,13 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
-    private class SearchSortTypeList(SORT: List<MrmFilter>) : UriSelectOneFilter("Sort by", "ep_sort", SORT)
-    private class GenreFilter(GENRES: List<MrmFilter>) : UriSelectFilter("Genre", "ep_filter_genre", GENRES)
-    private class CatFilter(CATID: List<MrmFilter>) : UriSelectFilter("Popular Categories", "ep_filter_category", CATID)
-    private class TagFilter(POPTAG: List<MrmFilter>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", POPTAG)
-    private class ArtistFilter(POPART: List<MrmFilter>) : UriSelectFilter("Popular Artists", "ep_filter_artist", POPART)
-    private class PairingFilter(PAIR: List<MrmFilter>) : UriSelectFilter("Popular Pairings", "ep_filter_pairing", PAIR)
-    private class StatusFilter(STATUS: List<MrmFilter>) : UriSelectFilter("Status", "ep_filter_status", STATUS)
+    private class SearchSortTypeList(sorts: List<MrmFilter>) : UriSelectOneFilter("Sort by", "ep_sort", sorts)
+    private class GenreFilter(genres: List<MrmFilter>) : UriSelectFilter("Genre", "ep_filter_genre", genres)
+    private class CatFilter(catIds: List<MrmFilter>) : UriSelectFilter("Popular Categories", "ep_filter_category", catIds)
+    private class TagFilter(popularTags: List<MrmFilter>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", popularTags)
+    private class ArtistFilter(popularArtists: List<MrmFilter>) : UriSelectFilter("Popular Artists", "ep_filter_artist", popularArtists)
+    private class PairingFilter(pairs: List<MrmFilter>) : UriSelectFilter("Popular Pairings", "ep_filter_pairing", pairs)
+    private class StatusFilter(status: List<MrmFilter>) : UriSelectFilter("Status", "ep_filter_status", status)
 
     private class MrmFilter(name: String, val value: String) : AnimeFilter.CheckBox(name)
     private open class UriSelectFilter(
