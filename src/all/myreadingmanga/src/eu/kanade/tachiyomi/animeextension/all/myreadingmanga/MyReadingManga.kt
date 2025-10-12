@@ -64,8 +64,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private fun newCredential(): Credential {
         isLoggedIn.set(false)
         return Credential(
-            username = preferences.username,
-            password = preferences.password,
+            username = preferences.username.trim(),
+            password = preferences.password.trim(),
         )
     }
 
@@ -110,11 +110,13 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                     isLoggedIn.set(true)
                     return chain.proceed(request)
                 } else {
-                    Toast.makeText(
-                        Injekt.get<Application>(),
-                        "MyReadingManga login failed. Please check your credentials.",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Toast.makeText(
+                            Injekt.get<Application>(),
+                            "MyReadingManga login failed. Please check your credentials.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 }
             }
             return chain.proceed(request)
@@ -183,10 +185,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun latestUpdatesNextPageSelector(): String? = "li.pagination-next"
     override fun latestUpdatesSelector() = "article.category-video"
     override fun latestUpdatesFromElement(element: Element) = buildAnime(element.select("a.entry-title-link").first()!!, element.select("a.entry-image-link img").first())
-    override fun latestUpdatesParse(response: Response): AnimesPage {
-        cacheAssistant()
-        return super.searchAnimeParse(response)
-    }
+    override fun latestUpdatesParse(response: Response) = searchAnimeParse(response)
 
     /*
      * ========== Search ==========
@@ -197,13 +196,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val uri = Uri.parse("$baseUrl/page/$page/").buildUpon()
             .appendQueryParameter("ep_filter_category", "video")
             .appendQueryParameter("s", query)
-        filterList.forEach { filter ->
-            // If enforce language is checked, then apply language filter automatically
-            if (filter is EnforceLanguageFilter) {
-                filter.addToUri(uri)
-            } else if (filter is UriFilter) {
-                filter.addToUri(uri)
-            }
+        filterList.filterIsInstance<UriFilter>().forEach { filter ->
+            filter.addToUri(uri)
         }
         return GET(uri.toString(), headers)
     }
@@ -267,7 +261,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return animeDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
     }
 
-    private fun animeDetailsParse(document: Document, needCover: Boolean = true): SAnime {
+    private suspend fun animeDetailsParse(document: Document, needCover: Boolean = true): SAnime {
         return SAnime.create().apply {
             title = cleanTitle(document.select("h1").text())
             author = document.select(".entry-terms a[href*=artist]").firstOrNull()?.text()
@@ -291,7 +285,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
             if (needCover) {
                 client.newCall(GET("$baseUrl/search/?search=${document.location()}", headers))
-                    .execute()
+                    .awaitSuccess()
                     .use { response ->
                         response.asJsoup().selectFirst("div.wdm_results div.p_content img")
                             ?.getImage()?.getThumbnail()
