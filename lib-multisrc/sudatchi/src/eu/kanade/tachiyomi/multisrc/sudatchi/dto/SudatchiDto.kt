@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.animeextension.all.sudatchi.dto
+package eu.kanade.tachiyomi.multisrc.sudatchi.dto
 
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
@@ -39,7 +39,7 @@ data class AnimeDto(
     val id: String,
     val title: TitleDto,
     val status: String?, // FINISHED
-    val coverImage: String,
+    val coverImage: String?,
     @SerialName("genres")
     val animeGenres: List<String>?,
 ) {
@@ -57,7 +57,7 @@ data class AnimeRelatedDto(
     val id: Int,
     val title: TitleDto,
     val status: String?, // FINISHED
-    val coverImage: String,
+    val coverImage: CoverDto?,
     @SerialName("genres")
     val animeGenres: List<String>?,
 ) {
@@ -65,7 +65,7 @@ data class AnimeRelatedDto(
         url = "/anime/$id"
         title = this@AnimeRelatedDto.title.getTitle(titleLang)
         status = this@AnimeRelatedDto.status?.parseStatus() ?: SAnime.UNKNOWN
-        thumbnail_url = coverImage
+        thumbnail_url = coverImage?.extraLarge
         genre = animeGenres?.joinToString()
     }
 }
@@ -117,6 +117,11 @@ data class AnimeDetailDto(
                 appendLine("Alternative names:")
                 appendLine(names.joinToString("\n") { "- $it" })
             }
+
+            bannerImage?.takeIf(String::isNotBlank)?.let {
+                if (isNotEmpty()) append("\n\n")
+                append("![Banner]($it)")
+            }
         }.toString()
         status = this@AnimeDetailDto.status.parseStatus()
         thumbnail_url = coverImage?.extraLarge ?: bannerImage
@@ -127,12 +132,12 @@ data class AnimeDetailDto(
     @Serializable
     data class AiringDto(
         val ep: Int, // episode number
-        val at: Int, // timestamp
+        val at: Double, // timestamp
     )
 }
 
 private fun String.parseStatus() = when (this) {
-    "LICENSED" -> SAnime.LICENSED // Not Yet Released
+    "LICENSED", "NOT_YET_RELEASED" -> SAnime.LICENSED // Not Yet Released
     "AIRING", "RELEASING" -> SAnime.ONGOING
     "FINISHED" -> SAnime.COMPLETED
     "CANCELLED" -> SAnime.CANCELLED
